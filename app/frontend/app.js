@@ -122,7 +122,14 @@ function researchPage() {
   const facts = understanding.product_facts.map((item, index) => `<label class="fact-field"><span>${escapeHtml(item.field)}<small>${escapeHtml(item.source)}</small></span><input data-fact-index="${index}" value="${escapeHtml(item.value)}"/></label>`).join("");
   const evidence = understanding.selling_point_evidence.map((item, index) => `<section class="evidence-row"><h3>${item.rank}. <input data-evidence-name="${index}" value="${escapeHtml(item.name)}"/></h3><label>产品视角<textarea data-evidence-product="${index}">${escapeHtml(item.product_view)}</textarea></label><label>用户视角<textarea data-evidence-user="${index}">${escapeHtml(item.user_view)}</textarea></label><small>${escapeHtml(item.source)}</small></section>`).join("");
   const confirmed = understanding.status === "confirmed";
-  return `<section class="research-page"><header class="page-header"><p class="eyebrow">第二阶段前置确认</p><h1>产品事实与卖点证据</h1><p>${confirmed ? "已确认。市场分析可由下一项任务手动启动。" : "请检查并确认后再进入市场分析。"}</p></header>${understanding.missing_items.length ? `<div class="warning-state">${understanding.missing_items.map(escapeHtml).join("<br/>")}</div>` : ""}<form id="understanding-form"><section class="work-section"><h2>产品事实</h2><div class="fact-grid">${facts}</div></section><section class="work-section"><h2>卖点证据</h2>${evidence}</section>${confirmed ? "" : `<div class="action-row"><button>保存修改</button><button id="confirm-understanding" type="button">确认产品事实与卖点</button></div>`}</form></section>`;
+  return `<section class="research-page"><header class="page-header"><p class="eyebrow">第二阶段前置确认</p><h1>产品事实与卖点证据</h1><p>${confirmed ? "已确认。可手动启动市场分析。" : "请检查并确认后再进入市场分析。"}</p></header>${understanding.missing_items.length ? `<div class="warning-state">${understanding.missing_items.map(escapeHtml).join("<br/>")}</div>` : ""}<form id="understanding-form"><section class="work-section"><h2>产品事实</h2><div class="fact-grid">${facts}</div></section><section class="work-section"><h2>卖点证据</h2>${evidence}</section>${confirmed ? "" : `<div class="action-row"><button>保存修改</button><button id="confirm-understanding" type="button">确认产品事实与卖点</button></div>`}</form>${confirmed ? marketControls() : ""}</section>`;
+}
+
+function marketControls() {
+  const analysis = state.project.market_analysis;
+  if (!analysis) return `<section class="work-section"><h2>市场分析</h2><p>仅在点击后处理当前已确认资料。</p><button id="start-market-analysis">启动市场分析</button></section>`;
+  const images = analysis.image_candidates;
+  return `<section class="work-section"><h2>市场分析</h2>${analysis.missing_items.length ? `<div class="warning-state">${analysis.missing_items.map(escapeHtml).join("<br/>")}</div>` : ""}<form id="weights-form" class="weight-form"><label>Markdown 资料权重<input name="markdown" type="number" min="0" max="10" value="${analysis.weights.markdown}"/></label><label>联网检索权重<input name="web" type="number" min="0" max="10" value="${analysis.weights.web}"/></label><button>应用权重</button></form><button id="open-image-review" ${images.length ? "" : "disabled"}>确认视觉参考图片（${images.length}）</button>${images.length ? `<dialog id="image-review-dialog"><form id="image-review-form"><h2>图片候选确认</h2>${images.map((image) => `<label class="image-review-row"><span>${escapeHtml(image.local_path.split("/").pop())}</span><select data-image-id="${image.image_id}"><option value="pending" ${image.review_status === "pending" ? "selected" : ""}>待定</option><option value="selected" ${image.review_status === "selected" ? "selected" : ""}>采用</option><option value="rejected" ${image.review_status === "rejected" ? "selected" : ""}>弃用</option></select></label>`).join("")}<div class="action-row"><button>保存图片确认</button><button id="close-image-review" type="button">关闭</button></div></form></dialog>` : ""}</section>`;
 }
 
 function render() {
@@ -187,6 +194,20 @@ function bindEvents() {
   document.querySelector("#confirm-understanding")?.addEventListener("click", async (event) => {
     event.currentTarget.disabled = true; event.currentTarget.textContent = "正在确认";
     try { await request(`/api/projects/${state.project.project_id}/product-understanding/confirm`, { method: "POST" }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
+  });
+  document.querySelector("#start-market-analysis")?.addEventListener("click", async (event) => {
+    event.currentTarget.disabled = true; event.currentTarget.textContent = "正在分析";
+    try { await request(`/api/projects/${state.project.project_id}/market-analysis/start`, { method: "POST" }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
+  });
+  document.querySelector("#weights-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const values = new FormData(event.currentTarget); const button = event.currentTarget.querySelector("button"); button.disabled = true; button.textContent = "正在应用";
+    try { await request(`/api/projects/${state.project.project_id}/weights`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ markdown: Number(values.get("markdown")), web: Number(values.get("web")) }) }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
+  });
+  document.querySelector("#open-image-review")?.addEventListener("click", () => document.querySelector("#image-review-dialog").showModal());
+  document.querySelector("#close-image-review")?.addEventListener("click", () => document.querySelector("#image-review-dialog").close());
+  document.querySelector("#image-review-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const reviews = Object.fromEntries([...document.querySelectorAll("[data-image-id]")].map((select) => [select.dataset.imageId, select.value]));
+    try { await request(`/api/projects/${state.project.project_id}/image-candidates`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviews }) }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
   });
 }
 

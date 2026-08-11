@@ -95,6 +95,12 @@ class ProjectStore:
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(version_id) REFERENCES project_versions(version_id)
                 );
+                CREATE TABLE IF NOT EXISTS market_analysis_results (
+                    version_id TEXT PRIMARY KEY,
+                    result_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(version_id) REFERENCES project_versions(version_id)
+                );
                 """
             )
 
@@ -145,7 +151,78 @@ class ProjectStore:
         payload["files"] = [dict(row) for row in files]
         payload["rule_bindings"] = self.get_rule_bindings(payload["current_version_id"])
         payload["product_understanding"] = self.get_product_understanding(payload["current_version_id"])
+        payload["market_analysis"] = self.get_market_analysis(payload["current_version_id"])
         return payload
+
+    def get_market_analysis(self, version_id: str) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            row = connection.execute("SELECT result_json, updated_at FROM market_analysis_results WHERE version_id = ?", (version_id,)).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row["result_json"])
+        payload["updated_at"] = row["updated_at"]
+        return payload
+
+    def run_market_analysis(self, project_id: str) -> dict[str, Any]:
+        project = self.get_project(project_id)
+        if project is None:
+            raise LookupError("未找到对应项目")
+        understanding = project["product_understanding"]
+        if understanding is None or understanding["status"] != "confirmed":
+            raise ValueError("请先确认产品事实和卖点证据")
+        version_id = project["current_version_id"]
+        version_dir = self._version_dir(project_id, version_id)
+        weights = self._get_weights(version_id)
+        images = [
+            {"image_id": uuid.uuid4().hex, "project_id": project_id, "version_id": version_id, "category": "user_upload", "source_type": "user_upload", "source_url": "", "search_query": "", "local_path": str(path.relative_to(PROJECTS_ROOT).as_posix()), "page_type": "", "related_claims": [], "ai_reason": "用户上传图片，等待人工确认", "captured_at": now(), "evidence_status": "available", "review_status": "pending", "user_note": ""}
+            for path in (version_dir / "source" / "uploads").glob("*") if path.is_file()
+        ]
+        result = {"status": "completed", "adapter": "local_markdown", "data": [], "conclusions": [], "sources": [{"type": "markdown", "path": path.relative_to(PROJECTS_ROOT).as_posix()} for path in (version_dir / "source").rglob("*.md")], "captured_at": now(), "screenshots": [], "missing_items": ["未配置联网调研 Skill，未执行联网检索"], "evidence_labels": [], "weights": weights, "image_candidates": images}
+        self._save_market_analysis(project, result)
+        return self.get_market_analysis(version_id) or result
+
+    def update_weights(self, project_id: str, markdown: Any, web: Any) -> dict[str, Any]:
+        project = self.get_project(project_id)
+        if project is None:
+            raise LookupError("未找到对应项目")
+        if not isinstance(markdown, int) or not isinstance(web, int) or markdown < 0 or web < 0 or markdown + web != 10:
+            raise ValueError("Markdown 与联网权重必须为非负整数，且总和固定为 10")
+        with self._connection() as connection:
+            connection.execute("UPDATE project_versions SET weights_json = ? WHERE version_id = ?", (json.dumps({"markdown": markdown, "web": web}), project["current_version_id"]))
+        analysis = self.get_market_analysis(project["current_version_id"])
+        if analysis:
+            analysis["weights"] = {"markdown": markdown, "web": web}
+            self._save_market_analysis(project, analysis)
+        return self.get_project(project_id) or project
+
+    def review_image_candidates(self, project_id: str, reviews: dict[str, str]) -> dict[str, Any]:
+        project = self.get_project(project_id)
+        if project is None:
+            raise LookupError("未找到对应项目")
+        analysis = self.get_market_analysis(project["current_version_id"])
+        if analysis is None:
+            raise ValueError("请先启动市场分析")
+        valid = {"pending", "selected", "rejected"}
+        for image in analysis["image_candidates"]:
+            if image["image_id"] in reviews:
+                status = reviews[image["image_id"]]
+                if status not in valid:
+                    raise ValueError("图片确认状态无效")
+                image["review_status"] = status
+        self._save_market_analysis(project, analysis)
+        return self.get_market_analysis(project["current_version_id"]) or analysis
+
+    def _get_weights(self, version_id: str) -> dict[str, int]:
+        with self._connection() as connection:
+            row = connection.execute("SELECT weights_json FROM project_versions WHERE version_id = ?", (version_id,)).fetchone()
+        return json.loads(row["weights_json"]) if row else {"markdown": 8, "web": 2}
+
+    def _save_market_analysis(self, project: dict[str, Any], result: dict[str, Any]) -> None:
+        version_id = project["current_version_id"]
+        destination = self._version_dir(project["project_id"], version_id) / "outputs" / "market-analysis.json"
+        destination.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        with self._connection() as connection:
+            connection.execute("INSERT INTO market_analysis_results(version_id, result_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(version_id) DO UPDATE SET result_json = excluded.result_json, updated_at = excluded.updated_at", (version_id, json.dumps(result, ensure_ascii=False), now()))
 
     def get_product_understanding(self, version_id: str) -> dict[str, Any] | None:
         with self._connection() as connection:

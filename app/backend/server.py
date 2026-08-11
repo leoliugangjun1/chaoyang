@@ -110,6 +110,11 @@ class ApplicationHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.OK, PROJECT_STORE.confirm_product_understanding(confirmation_match.group(1)))
                 return
 
+            market_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/market-analysis/start", request_path)
+            if market_match:
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.run_market_analysis(market_match.group(1)))
+                return
+
             self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
         except ValueError as error:
             self._send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
@@ -125,6 +130,29 @@ class ApplicationHandler(BaseHTTPRequestHandler):
         if understanding_match:
             try:
                 self._send_json(HTTPStatus.OK, PROJECT_STORE.update_product_understanding(understanding_match.group(1), self._read_json()))
+            except ValueError as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            except LookupError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
+            return
+        weights_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/weights", request_path)
+        if weights_match:
+            try:
+                payload = self._read_json()
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.update_weights(weights_match.group(1), payload.get("markdown"), payload.get("web")))
+            except ValueError as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            except LookupError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
+            return
+        images_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/image-candidates", request_path)
+        if images_match:
+            try:
+                payload = self._read_json()
+                reviews = payload.get("reviews", {})
+                if not isinstance(reviews, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in reviews.items()):
+                    raise ValueError("图片确认格式无效")
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.review_image_candidates(images_match.group(1), reviews))
             except ValueError as error:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
             except LookupError as error:
