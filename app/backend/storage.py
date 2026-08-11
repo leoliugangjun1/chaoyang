@@ -249,7 +249,8 @@ class ProjectStore:
                 (uuid.uuid4().hex, project_id, version_id, original_name, kind, relative_path, len(content), now())
             )
             if kind == "excel":
-                converted = version_dir / "source" / "excel-converted.md"
+                converted = self._converted_destination(version_dir, original_name)
+                converted.parent.mkdir(parents=True, exist_ok=True)
                 converted.write_text(self._xlsx_to_markdown(content), encoding="utf-8")
                 converted_relative_path = converted.relative_to(PROJECTS_ROOT).as_posix()
                 file_rows.append(
@@ -317,11 +318,27 @@ class ProjectStore:
     @staticmethod
     def _destination_for_upload(version_dir: Path, kind: str, original_name: str) -> Path:
         if kind == "markdown":
-            return version_dir / "source" / "original.md"
+            primary = version_dir / "source" / "original.md"
+            if not primary.exists():
+                return primary
+            safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", original_name)
+            return version_dir / "source" / "markdown" / f"{uuid.uuid4().hex}_{safe_name}"
         if kind == "excel":
-            return version_dir / "source" / "source.xlsx"
+            primary = version_dir / "source" / "source.xlsx"
+            if not primary.exists():
+                return primary
+            safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", original_name)
+            return version_dir / "source" / "excel" / f"{uuid.uuid4().hex}_{safe_name}"
         safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", original_name)
         return version_dir / "source" / "uploads" / f"{uuid.uuid4().hex}_{safe_name}"
+
+    @staticmethod
+    def _converted_destination(version_dir: Path, original_name: str) -> Path:
+        primary = version_dir / "source" / "excel-converted.md"
+        if not primary.exists():
+            return primary
+        safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(original_name).stem)
+        return version_dir / "source" / "excel-converted" / f"{uuid.uuid4().hex}_{safe_name}.md"
 
     @staticmethod
     def _version_payload(row: sqlite3.Row) -> dict[str, Any]:

@@ -68,7 +68,7 @@ function inputPage() {
     <div class="main-panel">
       <header class="page-header"><p class="eyebrow">第一阶段</p><h1>产品需求输入</h1><p>建立本地项目，保存产品资料并准备产品理解。</p></header>
       <section class="work-section"><h2>创建项目</h2><form id="project-form" class="inline-form"><input name="name" required maxlength="100" placeholder="项目名称" aria-label="项目名称" /><button>创建项目</button></form></section>
-      <section class="work-section ${state.project ? "" : "disabled-section"}"><h2>产品资料</h2><p>支持 Markdown、Excel 和图片。上传会生成新的项目版本。</p><form id="upload-form"><input id="file-input" name="files" type="file" multiple accept=".md,.markdown,.xlsx,.jpg,.jpeg,.png,.webp,.gif" ${state.project ? "" : "disabled"}/><button ${state.project ? "" : "disabled"}>保存资料</button></form>${state.project ? fileList() : ""}</section>
+      <section class="work-section ${state.project ? "" : "disabled-section"}"><h2>产品资料</h2><p>支持批量选择 Markdown、Excel 和图片。上传会生成新的项目版本。</p><form id="upload-form"><input id="file-input" name="files" type="file" multiple accept=".md,.markdown,.xlsx,.jpg,.jpeg,.png,.webp,.gif" ${state.project ? "" : "disabled"}/><div id="pending-file-list" class="pending-files" hidden></div><button ${state.project ? "" : "disabled"}>保存资料</button></form>${state.project ? fileList() : ""}</section>
       <section class="work-section ${state.project ? "" : "disabled-section"}"><h2>当前规则</h2><p>规则原文按版本保存。每类规则只可选择一条。</p>${ruleControls()}</section>
     </div>
   </section>`;
@@ -87,7 +87,26 @@ function ruleControls() {
 
 function fileList() {
   if (!state.project.files.length) return `<p class="empty-copy">当前版本尚未保存资料。</p>`;
-  return `<ul class="file-list">${state.project.files.map((file) => `<li><span>${escapeHtml(file.original_name)}</span><small>${escapeHtml(file.kind)} · ${file.size_bytes} B</small></li>`).join("")}</ul>`;
+  return groupedFileList(state.project.files, "已保存资料");
+}
+
+const fileGroups = [
+  ["markdown", "Markdown 产品资料"],
+  ["excel", "Excel 原始资料"],
+  ["converted_markdown", "Excel 转换 Markdown"],
+  ["image", "图片资料"],
+];
+
+function groupedFileList(files, heading) {
+  const groups = fileGroups.map(([kind, label]) => [label, files.filter((file) => file.kind === kind)]).filter(([, items]) => items.length);
+  return `<div class="categorized-files"><h3>${heading}</h3>${groups.map(([label, items]) => `<section><h4>${label}<small>${items.length} 个</small></h4><ul class="file-list">${items.map((file) => `<li><span>${escapeHtml(file.name || file.original_name)}</span><small>${file.size ? `${file.size} B` : `${file.size_bytes} B`}</small></li>`).join("")}</ul></section>`).join("")}</div>`;
+}
+
+function classifyFile(file) {
+  const extension = file.name.split(".").pop().toLowerCase();
+  if (["md", "markdown"].includes(extension)) return "markdown";
+  if (extension === "xlsx") return "excel";
+  return "image";
 }
 
 function lockedPage(stage) {
@@ -116,6 +135,12 @@ function bindEvents() {
     if (!formData.getAll("files").some((file) => file.size)) { state.error = "请选择至少一个文件"; render(); return; }
     button.disabled = true; button.textContent = "正在保存";
     try { await request(`/api/projects/${state.project.project_id}/files`, { method: "POST", body: formData }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
+  });
+  document.querySelector("#file-input")?.addEventListener("change", (event) => {
+    const container = document.querySelector("#pending-file-list");
+    const files = [...event.target.files].map((file) => ({ name: file.name, size: file.size, kind: classifyFile(file) }));
+    container.hidden = files.length === 0;
+    container.innerHTML = files.length ? groupedFileList(files, "待上传文件") : "";
   });
   document.querySelector("#rule-binding-form")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const button = event.currentTarget.querySelector("button"); button.disabled = true; button.textContent = "正在保存";
