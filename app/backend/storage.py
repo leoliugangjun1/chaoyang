@@ -206,6 +206,29 @@ class ProjectStore:
         with self._connection() as connection:
             connection.execute("INSERT INTO visual_dashboards(version_id, dashboard_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(version_id) DO UPDATE SET dashboard_json = excluded.dashboard_json, updated_at = excluded.updated_at", (version_id, json.dumps(dashboard, ensure_ascii=False), now()))
 
+    def export_visual_dashboard(self, project_id: str, export_type: str) -> Path:
+        project = self.get_project(project_id)
+        if project is None:
+            raise LookupError("未找到对应项目")
+        dashboard = project["visual_dashboard"]
+        if dashboard is None:
+            raise ValueError("请先生成视觉看板")
+        outputs = self._version_dir(project_id, project["current_version_id"]) / "outputs"
+        if export_type == "pdf":
+            destination = outputs / "visual-dashboard.pdf"
+            lines = [section["title"] for section in dashboard["sections"]] + [section["content"] for section in dashboard["sections"]]
+            destination.write_bytes(_simple_pdf(lines))
+            return destination
+        if export_type == "images":
+            destination = outputs / "visual-dashboard-images.zip"
+            with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
+                for image in dashboard["selected_images"]:
+                    path = PROJECTS_ROOT / image["local_path"]
+                    if path.is_file():
+                        archive.write(path, arcname=path.name)
+            return destination
+        raise ValueError("导出类型无效")
+
     def get_market_analysis(self, version_id: str) -> dict[str, Any] | None:
         with self._connection() as connection:
             row = connection.execute("SELECT result_json, updated_at FROM market_analysis_results WHERE version_id = ?", (version_id,)).fetchone()
@@ -615,3 +638,13 @@ class ProjectStore:
             *["| " + " | ".join(row) + " |" for row in normalized[1:]],
             "",
         ])
+
+
+def _simple_pdf(lines: list[str]) -> bytes:
+    safe = [re.sub(r"[^ -~]", "?", line)[:100] for line in lines if line.strip()] or ["Visual dashboard"]
+    stream = "BT /F1 18 Tf 50 780 Td " + " ".join(f"({line.replace('(', '[').replace(')', ']')}) Tj 0 -24 Td" for line in safe) + " ET"
+    objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream"]
+    body = "%PDF-1.4\n"; offsets = [0]
+    for index, obj in enumerate(objects, 1): offsets.append(len(body)); body += f"{index} 0 obj\n{obj}\nendobj\n"
+    start = len(body); body += f"xref\n0 {len(objects)+1}\n0000000000 65535 f \n" + "".join(f"{offset:010} 00000 n \n" for offset in offsets[1:]) + f"trailer << /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{start}\n%%EOF"
+    return body.encode("latin-1")

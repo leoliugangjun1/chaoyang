@@ -58,6 +58,14 @@ class ApplicationHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, project)
             return
 
+        export_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/exports/(pdf|images)", request_path)
+        if export_match:
+            try:
+                self._send_file(PROJECT_STORE.export_visual_dashboard(export_match.group(1), export_match.group(2)))
+            except (LookupError, ValueError) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            return
+
         if request_path.startswith("/api/"):
             self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
             return
@@ -255,6 +263,16 @@ class ApplicationHandler(BaseHTTPRequestHandler):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_file(self, path: Path) -> None:
+        data = path.read_bytes()
+        content_type = "application/pdf" if path.suffix == ".pdf" else "application/zip"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", f'attachment; filename="{path.name}"')
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)

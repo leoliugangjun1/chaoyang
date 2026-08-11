@@ -119,7 +119,8 @@ function lockedPage(stage) {
 function boardPage() {
   const board = state.project?.visual_dashboard;
   if (!board) return `<section class="placeholder-page"><p class="eyebrow">第三阶段</p><h1>视觉看板</h1><p>根据已确认资料、市场分析和视觉策划规则手动生成。</p><button id="start-visual-board">生成视觉看板</button></section>`;
-  return `<section class="research-page"><header class="page-header"><p class="eyebrow">第三阶段</p><h1>视觉看板</h1><p>仅可编辑文字内容，模块结构与采用图片记录保持不变。</p></header><form id="visual-board-form">${board.sections.map((section, index) => `<section class="evidence-row"><input data-board-title="${index}" value="${escapeHtml(section.title)}"/><textarea data-board-content="${index}" placeholder="填写此模块的视觉策划内容">${escapeHtml(section.content)}</textarea></section>`).join("")}<button>保存看板修改</button></form></section>`;
+  const base = `/api/projects/${state.project.project_id}/exports`;
+  return `<section class="research-page"><header class="page-header"><p class="eyebrow">第三阶段</p><h1>视觉看板</h1><p>仅可编辑文字内容，模块结构与采用图片记录保持不变。</p></header><form id="visual-board-form">${board.sections.map((section, index) => `<section class="evidence-row"><input data-board-title="${index}" value="${escapeHtml(section.title)}"/><textarea data-board-content="${index}" placeholder="填写此模块的视觉策划内容">${escapeHtml(section.content)}</textarea></section>`).join("")}<button>保存看板修改</button></form><p class="action-row"><a class="export-link" href="${base}/pdf">导出 PDF</a><a class="export-link" href="${base}/images">导出图片 ZIP</a></p></section>`;
 }
 
 function researchPage() {
