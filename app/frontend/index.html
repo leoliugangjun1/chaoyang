@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>服装视觉设计分析智能体</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell" aria-live="polite">
+      <p class="eyebrow">本地应用</p>
+      <h1>服装视觉设计分析智能体</h1>
+      <p id="service-status" class="status status-loading">正在连接本地服务</p>
+      <section id="empty-state" class="empty-state" hidden>
+        <h2>尚未创建项目</h2>
+        <p>项目、版本和文件存储将在下一项任务中启用。</p>
+      </section>
+      <section id="error-state" class="error-state" hidden>
+        <h2>无法连接本地服务</h2>
+        <p id="error-message">请确认本地服务正在运行。</p>
+        <button id="retry-button" type="button">重新连接</button>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
+

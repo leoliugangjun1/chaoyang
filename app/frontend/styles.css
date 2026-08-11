@@ -1,0 +1,79 @@
+:root {
+  color: #111111;
+  background: #f5f5f3;
+  font-family: "Noto Sans SC", "Microsoft YaHei", Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button {
+  border: 1px solid #111111;
+  border-radius: 4px;
+  background: #111111;
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  padding: 10px 14px;
+}
+
+button:hover {
+  background: #333333;
+}
+
+.app-shell {
+  margin: 0 auto;
+  max-width: 960px;
+  min-height: 100vh;
+  padding: 80px 32px;
+}
+
+.eyebrow {
+  color: #777777;
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+
+h1 {
+  font-size: 32px;
+  font-weight: 600;
+  margin: 0 0 24px;
+}
+
+h2 {
+  font-size: 20px;
+  margin-top: 0;
+}
+
+.status,
+.empty-state,
+.error-state {
+  border: 1px solid #e5e5e1;
+  border-radius: 8px;
+  max-width: 560px;
+  padding: 18px;
+}
+
+.status-loading {
+  color: #557d98;
+}
+
+.error-state {
+  border-color: #a14e4e;
+}
+
+@media (max-width: 560px) {
+  .app-shell {
+    padding: 48px 20px;
+  }
+
+  h1 {
+    font-size: 26px;
+  }
+}
