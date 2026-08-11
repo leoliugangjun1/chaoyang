@@ -100,6 +100,16 @@ class ApplicationHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.OK, project)
                 return
 
+            understanding_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/product-understanding/start", request_path)
+            if understanding_match:
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.run_product_understanding(understanding_match.group(1)))
+                return
+
+            confirmation_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/product-understanding/confirm", request_path)
+            if confirmation_match:
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.confirm_product_understanding(confirmation_match.group(1)))
+                return
+
             self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
         except ValueError as error:
             self._send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
@@ -111,6 +121,15 @@ class ApplicationHandler(BaseHTTPRequestHandler):
 
     def do_PATCH(self) -> None:  # noqa: N802
         request_path = urlparse(self.path).path
+        understanding_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/product-understanding", request_path)
+        if understanding_match:
+            try:
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.update_product_understanding(understanding_match.group(1), self._read_json()))
+            except ValueError as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            except LookupError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
+            return
         rename_match = re.fullmatch(r"/api/rules/([a-f0-9]{32})", request_path)
         if rename_match:
             try:

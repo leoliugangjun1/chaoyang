@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
+from app.backend.product_understanding import build_product_understanding
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 DATA_ROOT = APP_ROOT / "data"
@@ -87,6 +88,13 @@ class ProjectStore:
                     FOREIGN KEY(version_id) REFERENCES project_versions(version_id),
                     FOREIGN KEY(rule_id) REFERENCES rules(rule_id)
                 );
+                CREATE TABLE IF NOT EXISTS product_understanding_results (
+                    version_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(version_id) REFERENCES project_versions(version_id)
+                );
                 """
             )
 
@@ -136,7 +144,85 @@ class ProjectStore:
         payload["versions"] = [self._version_payload(row) for row in versions]
         payload["files"] = [dict(row) for row in files]
         payload["rule_bindings"] = self.get_rule_bindings(payload["current_version_id"])
+        payload["product_understanding"] = self.get_product_understanding(payload["current_version_id"])
         return payload
+
+    def get_product_understanding(self, version_id: str) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT status, result_json, updated_at FROM product_understanding_results WHERE version_id = ?", (version_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row["result_json"])
+        payload["status"] = row["status"]
+        payload["updated_at"] = row["updated_at"]
+        return payload
+
+    def run_product_understanding(self, project_id: str) -> dict[str, Any]:
+        project = self.get_project(project_id)
+        if project is None:
+            raise LookupError("未找到对应项目")
+        rule = project["rule_bindings"].get("product_validation")
+        if rule is None:
+            raise ValueError("请先绑定产品事实校验规则")
+        version_dir = self._version_dir(project_id, project["current_version_id"])
+        documents = [(path, path.read_text(encoding="utf-8")) for path in (version_dir / "source").rglob("*.md")]
+        if not documents:
+            raise ValueError("当前版本没有可解析的 Markdown 资料")
+        result = build_product_understanding(documents, rule)
+        result["project_id"] = project_id
+        result["version_id"] = project["current_version_id"]
+        self._save_product_understanding(project, result, "pending_user_confirmation")
+        return self.get_product_understanding(project["current_version_id"]) or result
+
+    def update_product_understanding(self, project_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        project = self.get_project(project_id)
+        if project is None:
+            raise LookupError("未找到对应项目")
+        current = self.get_product_understanding(project["current_version_id"])
+        if current is None:
+            raise ValueError("请先启动产品理解")
+        facts = result.get("product_facts")
+        evidence = result.get("selling_point_evidence")
+        if not isinstance(facts, list) or not isinstance(evidence, list):
+            raise ValueError("产品理解结果格式无效")
+        original_ranks = [item["rank"] for item in current["selling_point_evidence"]]
+        updated_ranks = [item.get("rank") for item in evidence if isinstance(item, dict)]
+        if updated_ranks != original_ranks:
+            raise ValueError("不得修改 Markdown 卖点原始顺序")
+        current["product_facts"] = facts
+        current["selling_point_evidence"] = evidence
+        current["missing_items"] = result.get("missing_items", current.get("missing_items", []))
+        self._save_product_understanding(project, current, "pending_user_confirmation")
+        return self.get_product_understanding(project["current_version_id"]) or current
+
+    def confirm_product_understanding(self, project_id: str) -> dict[str, Any]:
+        project = self.get_project(project_id)
+        if project is None:
+            raise LookupError("未找到对应项目")
+        result = self.get_product_understanding(project["current_version_id"])
+        if result is None:
+            raise ValueError("请先启动产品理解")
+        if not result["product_facts"] or not result["selling_point_evidence"]:
+            raise ValueError("产品事实和卖点证据均需存在后才能确认")
+        for item in result["product_facts"]:
+            item["status"] = "confirmed"
+        for item in result["selling_point_evidence"]:
+            item["status"] = "confirmed"
+        self._save_product_understanding(project, result, "confirmed")
+        return self.get_product_understanding(project["current_version_id"]) or result
+
+    def _save_product_understanding(self, project: dict[str, Any], result: dict[str, Any], status: str) -> None:
+        version_id = project["current_version_id"]
+        version_dir = self._version_dir(project["project_id"], version_id)
+        (version_dir / "product" / "product-facts.json").write_text(json.dumps(result["product_facts"], ensure_ascii=False, indent=2), encoding="utf-8")
+        (version_dir / "product" / "selling-point-evidence.json").write_text(json.dumps(result["selling_point_evidence"], ensure_ascii=False, indent=2), encoding="utf-8")
+        with self._connection() as connection:
+            connection.execute(
+                "INSERT INTO product_understanding_results(version_id, status, result_json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(version_id) DO UPDATE SET status = excluded.status, result_json = excluded.result_json, updated_at = excluded.updated_at",
+                (version_id, status, json.dumps(result, ensure_ascii=False), now()),
+            )
 
     def list_rules(self, rule_type: str | None = None, include_archived: bool = False) -> list[dict[str, Any]]:
         query = "SELECT * FROM rules"

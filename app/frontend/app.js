@@ -115,9 +115,18 @@ function lockedPage(stage) {
   return `<section class="placeholder-page"><p class="eyebrow">${stage === "research" ? "第二阶段" : "第三阶段"}</p><h1>${label}</h1><p>${state.project ? "此阶段将在后续任务中实现，并保持手动启动。" : "请先在第一阶段创建或选择项目。"}</p><button data-stage="input">返回产品需求输入</button></section>`;
 }
 
+function researchPage() {
+  const understanding = state.project?.product_understanding;
+  if (!understanding) return `<section class="placeholder-page"><p class="eyebrow">第二阶段前置确认</p><h1>规则校验与设计调研</h1><p>产品理解会读取当前版本的 Markdown 资料，并生成待确认的产品事实与卖点证据。</p><button id="start-understanding">启动产品理解</button></section>`;
+  const facts = understanding.product_facts.map((item, index) => `<label class="fact-field"><span>${escapeHtml(item.field)}<small>${escapeHtml(item.source)}</small></span><input data-fact-index="${index}" value="${escapeHtml(item.value)}"/></label>`).join("");
+  const evidence = understanding.selling_point_evidence.map((item, index) => `<section class="evidence-row"><h3>${item.rank}. <input data-evidence-name="${index}" value="${escapeHtml(item.name)}"/></h3><label>产品视角<textarea data-evidence-product="${index}">${escapeHtml(item.product_view)}</textarea></label><label>用户视角<textarea data-evidence-user="${index}">${escapeHtml(item.user_view)}</textarea></label><small>${escapeHtml(item.source)}</small></section>`).join("");
+  const confirmed = understanding.status === "confirmed";
+  return `<section class="research-page"><header class="page-header"><p class="eyebrow">第二阶段前置确认</p><h1>产品事实与卖点证据</h1><p>${confirmed ? "已确认。市场分析可由下一项任务手动启动。" : "请检查并确认后再进入市场分析。"}</p></header>${understanding.missing_items.length ? `<div class="warning-state">${understanding.missing_items.map(escapeHtml).join("<br/>")}</div>` : ""}<form id="understanding-form"><section class="work-section"><h2>产品事实</h2><div class="fact-grid">${facts}</div></section><section class="work-section"><h2>卖点证据</h2>${evidence}</section>${confirmed ? "" : `<div class="action-row"><button>保存修改</button><button id="confirm-understanding" type="button">确认产品事实与卖点</button></div>`}</form></section>`;
+}
+
 function render() {
   const stage = currentStage();
-  const body = state.loading ? `<div class="loading">正在读取本地项目</div>` : state.error ? `<div class="error-state"><h2>无法读取本地服务</h2><p>${escapeHtml(state.error)}</p><button id="retry">重新连接</button></div>` : stage === "input" ? inputPage() : lockedPage(stage);
+  const body = state.loading ? `<div class="loading">正在读取本地项目</div>` : state.error ? `<div class="error-state"><h2>无法读取本地服务</h2><p>${escapeHtml(state.error)}</p><button id="retry">重新连接</button></div>` : stage === "input" ? inputPage() : stage === "research" ? researchPage() : lockedPage(stage);
   app.innerHTML = `<header class="topbar"><a class="brand" href="#stage=input">服装视觉设计分析</a><nav>${navItem("input", "产品输入", "01")}${navItem("research", "规则校验与调研", "02")}${navItem("board", "视觉看板", "03")}</nav><div class="top-status">${state.project ? "本地已保存" : "等待项目"}</div></header><main>${body}</main>`;
   bindEvents();
 }
@@ -156,6 +165,23 @@ function bindEvents() {
     event.preventDefault(); const button = event.currentTarget.querySelector("button"); button.disabled = true; button.textContent = "正在保存";
     try { await request(`/api/rules/${event.currentTarget.dataset.ruleId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: new FormData(event.currentTarget).get("name") }) }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
   }));
+  document.querySelector("#start-understanding")?.addEventListener("click", async (event) => {
+    event.currentTarget.disabled = true; event.currentTarget.textContent = "正在解析";
+    try { await request(`/api/projects/${state.project.project_id}/product-understanding/start`, { method: "POST" }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
+  });
+  document.querySelector("#understanding-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const button = event.currentTarget.querySelector("button[type=submit], button:not([type])"); button.disabled = true; button.textContent = "正在保存";
+    const result = structuredClone(state.project.product_understanding);
+    document.querySelectorAll("[data-fact-index]").forEach((input) => { result.product_facts[input.dataset.factIndex].value = input.value; });
+    document.querySelectorAll("[data-evidence-name]").forEach((input) => { result.selling_point_evidence[input.dataset.evidenceName].name = input.value; });
+    document.querySelectorAll("[data-evidence-product]").forEach((input) => { result.selling_point_evidence[input.dataset.evidenceProduct].product_view = input.value; });
+    document.querySelectorAll("[data-evidence-user]").forEach((input) => { result.selling_point_evidence[input.dataset.evidenceUser].user_view = input.value; });
+    try { await request(`/api/projects/${state.project.project_id}/product-understanding`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
+  });
+  document.querySelector("#confirm-understanding")?.addEventListener("click", async (event) => {
+    event.currentTarget.disabled = true; event.currentTarget.textContent = "正在确认";
+    try { await request(`/api/projects/${state.project.project_id}/product-understanding/confirm`, { method: "POST" }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
+  });
 }
 
 window.addEventListener("hashchange", loadProjects);
