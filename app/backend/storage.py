@@ -107,6 +107,17 @@ class ProjectStore:
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(version_id) REFERENCES project_versions(version_id)
                 );
+                CREATE TABLE IF NOT EXISTS tasks (
+                    task_id TEXT PRIMARY KEY,
+                    version_id TEXT NOT NULL,
+                    stage TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    step TEXT NOT NULL,
+                    attempts INTEGER NOT NULL,
+                    error_message TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -159,7 +170,46 @@ class ProjectStore:
         payload["product_understanding"] = self.get_product_understanding(payload["current_version_id"])
         payload["market_analysis"] = self.get_market_analysis(payload["current_version_id"])
         payload["visual_dashboard"] = self.get_visual_dashboard(payload["current_version_id"])
+        payload["tasks"] = self.get_tasks(payload["current_version_id"])
         return payload
+
+    def get_tasks(self, version_id: str) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            return [dict(row) for row in connection.execute("SELECT * FROM tasks WHERE version_id = ? ORDER BY updated_at DESC", (version_id,)).fetchall()]
+
+    def switch_version(self, project_id: str, version_id: str) -> dict[str, Any]:
+        with self._connection() as connection:
+            row = connection.execute("SELECT version_id FROM project_versions WHERE project_id = ? AND version_id = ?", (project_id, version_id)).fetchone()
+            if row is None:
+                raise ValueError("该版本不属于当前项目")
+            connection.execute("UPDATE projects SET current_version_id = ?, updated_at = ? WHERE project_id = ?", (version_id, now(), project_id))
+        return self.get_project(project_id) or {}
+
+    def create_task(self, project_id: str, stage: str) -> dict[str, Any]:
+        project = self.get_project(project_id)
+        if project is None:
+            raise LookupError("未找到对应项目")
+        task = {"task_id": uuid.uuid4().hex, "version_id": project["current_version_id"], "stage": stage, "status": "running", "step": "queued", "attempts": 1, "error_message": "", "created_at": now(), "updated_at": now()}
+        with self._connection() as connection:
+            connection.execute("INSERT INTO tasks VALUES (:task_id,:version_id,:stage,:status,:step,:attempts,:error_message,:created_at,:updated_at)", task)
+        return task
+
+    def cancel_task(self, project_id: str, task_id: str) -> None:
+        project = self.get_project(project_id)
+        if project is None:
+            raise LookupError("未找到对应项目")
+        with self._connection() as connection:
+            connection.execute("DELETE FROM tasks WHERE task_id = ? AND version_id = ? AND status != 'completed'", (task_id, project["current_version_id"]))
+
+    def finish_task(self, task_id: str, status: str, step: str, error_message: str = "", attempts: int | None = None) -> None:
+        values: list[Any] = [status, step, error_message, now(), task_id]
+        query = "UPDATE tasks SET status = ?, step = ?, error_message = ?, updated_at = ?"
+        if attempts is not None:
+            query += ", attempts = ?"
+            values.insert(4, attempts)
+        query += " WHERE task_id = ?"
+        with self._connection() as connection:
+            connection.execute(query, values)
 
     def get_visual_dashboard(self, version_id: str) -> dict[str, Any] | None:
         with self._connection() as connection:

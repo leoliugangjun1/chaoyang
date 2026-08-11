@@ -55,7 +55,8 @@ function navItem(stage, label, index) {
 function projectSummary() {
   if (!state.project) return `<div class="sidebar-empty">尚未选择项目</div>`;
   const version = state.project.versions.find((item) => item.version_id === state.project.current_version_id);
-  return `<div class="project-summary"><strong>${escapeHtml(state.project.name)}</strong><span>版本 ${escapeHtml(version?.version_number || "-")}</span><span>${state.project.files.length} 个文件</span></div>`;
+  const tasks = state.project.tasks || [];
+  return `<div class="project-summary"><strong>${escapeHtml(state.project.name)}</strong><label>版本<select id="version-select">${state.project.versions.map((item) => `<option value="${item.version_id}" ${item.version_id === state.project.current_version_id ? "selected" : ""}>版本 ${escapeHtml(item.version_number)}</option>`).join("")}</select></label><span>${state.project.files.length} 个文件</span><div class="task-status"><small>任务状态</small>${tasks.length ? tasks.slice(0, 3).map((task) => `<span>${escapeHtml(task.stage)} · ${escapeHtml(task.status)}${task.error_message ? `：${escapeHtml(task.error_message)}` : ""}</span>`).join("") : "<span>尚无任务</span>"}</div></div>`;
 }
 
 function inputPage() {
@@ -150,6 +151,9 @@ function bindEvents() {
   document.querySelectorAll("[data-stage]").forEach((button) => button.addEventListener("click", () => setRoute(button.dataset.stage)));
   document.querySelector("#retry")?.addEventListener("click", loadProjects);
   document.querySelector("#project-select")?.addEventListener("change", (event) => setRoute("input", event.target.value));
+  document.querySelector("#version-select")?.addEventListener("change", async (event) => {
+    try { await request(`/api/projects/${state.project.project_id}/versions/${event.target.value}/switch`, { method: "POST" }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
+  });
   document.querySelector("#project-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = event.currentTarget.querySelector("button"); button.disabled = true; button.textContent = "正在创建";

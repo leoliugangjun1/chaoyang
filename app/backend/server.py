@@ -110,7 +110,7 @@ class ApplicationHandler(BaseHTTPRequestHandler):
 
             understanding_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/product-understanding/start", request_path)
             if understanding_match:
-                self._send_json(HTTPStatus.OK, PROJECT_STORE.run_product_understanding(understanding_match.group(1)))
+                self._send_json(HTTPStatus.OK, self._run_stage(understanding_match.group(1), "product_understanding", PROJECT_STORE.run_product_understanding))
                 return
 
             confirmation_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/product-understanding/confirm", request_path)
@@ -120,11 +120,25 @@ class ApplicationHandler(BaseHTTPRequestHandler):
 
             market_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/market-analysis/start", request_path)
             if market_match:
-                self._send_json(HTTPStatus.OK, PROJECT_STORE.run_market_analysis(market_match.group(1)))
+                self._send_json(HTTPStatus.OK, self._run_stage(market_match.group(1), "market_analysis", PROJECT_STORE.run_market_analysis))
                 return
             board_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/visual-dashboard/start", request_path)
             if board_match:
-                self._send_json(HTTPStatus.OK, PROJECT_STORE.create_visual_dashboard(board_match.group(1)))
+                self._send_json(HTTPStatus.OK, self._run_stage(board_match.group(1), "visual_dashboard", PROJECT_STORE.create_visual_dashboard))
+                return
+            version_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/versions/([a-f0-9]{32})/switch", request_path)
+            if version_match:
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.switch_version(version_match.group(1), version_match.group(2)))
+                return
+            task_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/tasks", request_path)
+            if task_match:
+                payload = self._read_json()
+                self._send_json(HTTPStatus.CREATED, PROJECT_STORE.create_task(task_match.group(1), str(payload.get("stage", "manual"))))
+                return
+            cancel_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/tasks/([a-f0-9]{32})/cancel", request_path)
+            if cancel_match:
+                PROJECT_STORE.cancel_task(cancel_match.group(1), cancel_match.group(2))
+                self._send_json(HTTPStatus.OK, {"status": "cancelled"})
                 return
 
             self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
@@ -206,6 +220,20 @@ class ApplicationHandler(BaseHTTPRequestHandler):
             return json.loads(self._read_body().decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ValueError("JSON 请求内容无效") from error
+
+    @staticmethod
+    def _run_stage(project_id: str, stage: str, operation: object) -> dict[str, object]:
+        task = PROJECT_STORE.create_task(project_id, stage)
+        for attempt in (1, 2):
+            try:
+                result = operation(project_id)  # type: ignore[operator]
+                PROJECT_STORE.finish_task(task["task_id"], "completed", "completed", attempts=attempt)
+                return result
+            except (ValueError, LookupError) as error:
+                PROJECT_STORE.finish_task(task["task_id"], "failed", "failed", str(error), attempt)
+                if attempt == 2:
+                    raise
+        raise RuntimeError("阶段执行失败")
 
     def _read_multipart_files(self) -> list[dict[str, object]]:
         content_type = self.headers.get("Content-Type", "")
