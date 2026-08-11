@@ -16,7 +16,7 @@
 
 ## 02. 项目、版本与文件持久化
 
-- [ ] 修改目标：实现 SQLite 项目和版本记录、本地文件保存、Markdown 上传、Excel 转 Markdown 与图片保存。
+- [x] 修改目标：实现 SQLite 项目和版本记录、本地文件保存、Markdown 上传、Excel 转 Markdown 与图片保存。
 - 允许修改范围：`app/backend/`、`app/frontend/` 中项目输入所需文件、`app/projects/`、本文件。
 - 不允许破坏的逻辑：新资料必须创建新版本；原始文件和转换文件不得覆盖；前端状态不能作为唯一数据源。
 - 验收标准：创建项目后刷新仍可查看；上传 Markdown、Excel、图片后均可追溯；空文件和保存失败有明确提示。
