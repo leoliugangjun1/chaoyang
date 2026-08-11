@@ -101,6 +101,12 @@ class ProjectStore:
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(version_id) REFERENCES project_versions(version_id)
                 );
+                CREATE TABLE IF NOT EXISTS visual_dashboards (
+                    version_id TEXT PRIMARY KEY,
+                    dashboard_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(version_id) REFERENCES project_versions(version_id)
+                );
                 """
             )
 
@@ -152,7 +158,53 @@ class ProjectStore:
         payload["rule_bindings"] = self.get_rule_bindings(payload["current_version_id"])
         payload["product_understanding"] = self.get_product_understanding(payload["current_version_id"])
         payload["market_analysis"] = self.get_market_analysis(payload["current_version_id"])
+        payload["visual_dashboard"] = self.get_visual_dashboard(payload["current_version_id"])
         return payload
+
+    def get_visual_dashboard(self, version_id: str) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            row = connection.execute("SELECT dashboard_json FROM visual_dashboards WHERE version_id = ?", (version_id,)).fetchone()
+        return json.loads(row["dashboard_json"]) if row else None
+
+    def create_visual_dashboard(self, project_id: str) -> dict[str, Any]:
+        project = self.get_project(project_id)
+        if project is None:
+            raise LookupError("未找到对应项目")
+        if project["market_analysis"] is None:
+            raise ValueError("请先完成市场分析")
+        rule = project["rule_bindings"].get("visual_planning")
+        if rule is None:
+            raise ValueError("请先绑定视觉策划规则")
+        rule_content = (APP_ROOT / rule["source_markdown_path"]).read_text(encoding="utf-8")
+        headings = [line.lstrip("#").strip() for line in rule_content.splitlines() if line.startswith("## ")]
+        if not headings:
+            raise ValueError("视觉策划规则未定义可渲染模块")
+        selected_images = [image for image in project["market_analysis"]["image_candidates"] if image["review_status"] == "selected"]
+        dashboard = {"project_id": project_id, "version_id": project["current_version_id"], "layout_schema": {"sections_from_rule": True}, "sections": [{"id": uuid.uuid4().hex, "title": title, "content": "", "images": []} for title in headings], "selected_images": selected_images, "editable_fields": ["sections[].title", "sections[].content", "sections[].images"], "pdf_payload": {}}
+        self._save_visual_dashboard(project, dashboard)
+        return dashboard
+
+    def update_visual_dashboard(self, project_id: str, dashboard: dict[str, Any]) -> dict[str, Any]:
+        project = self.get_project(project_id)
+        if project is None:
+            raise LookupError("未找到对应项目")
+        current = self.get_visual_dashboard(project["current_version_id"])
+        if current is None:
+            raise ValueError("请先生成视觉看板")
+        if [item["id"] for item in dashboard.get("sections", [])] != [item["id"] for item in current["sections"]]:
+            raise ValueError("不得修改视觉策划规则定义的看板结构")
+        dashboard["selected_images"] = current["selected_images"]
+        dashboard["layout_schema"] = current["layout_schema"]
+        dashboard["editable_fields"] = current["editable_fields"]
+        self._save_visual_dashboard(project, dashboard)
+        return dashboard
+
+    def _save_visual_dashboard(self, project: dict[str, Any], dashboard: dict[str, Any]) -> None:
+        version_id = project["current_version_id"]
+        destination = self._version_dir(project["project_id"], version_id) / "outputs" / "visual-dashboard.json"
+        destination.write_text(json.dumps(dashboard, ensure_ascii=False, indent=2), encoding="utf-8")
+        with self._connection() as connection:
+            connection.execute("INSERT INTO visual_dashboards(version_id, dashboard_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(version_id) DO UPDATE SET dashboard_json = excluded.dashboard_json, updated_at = excluded.updated_at", (version_id, json.dumps(dashboard, ensure_ascii=False), now()))
 
     def get_market_analysis(self, version_id: str) -> dict[str, Any] | None:
         with self._connection() as connection:

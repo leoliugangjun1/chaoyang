@@ -114,6 +114,10 @@ class ApplicationHandler(BaseHTTPRequestHandler):
             if market_match:
                 self._send_json(HTTPStatus.OK, PROJECT_STORE.run_market_analysis(market_match.group(1)))
                 return
+            board_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/visual-dashboard/start", request_path)
+            if board_match:
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.create_visual_dashboard(board_match.group(1)))
+                return
 
             self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
         except ValueError as error:
@@ -153,6 +157,15 @@ class ApplicationHandler(BaseHTTPRequestHandler):
                 if not isinstance(reviews, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in reviews.items()):
                     raise ValueError("图片确认格式无效")
                 self._send_json(HTTPStatus.OK, PROJECT_STORE.review_image_candidates(images_match.group(1), reviews))
+            except ValueError as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            except LookupError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
+            return
+        board_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/visual-dashboard", request_path)
+        if board_match:
+            try:
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.update_visual_dashboard(board_match.group(1), self._read_json()))
             except ValueError as error:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
             except LookupError as error:

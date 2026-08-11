@@ -116,6 +116,12 @@ function lockedPage(stage) {
   return `<section class="placeholder-page"><p class="eyebrow">${stage === "research" ? "第二阶段" : "第三阶段"}</p><h1>${label}</h1><p>${state.project ? "此阶段将在后续任务中实现，并保持手动启动。" : "请先在第一阶段创建或选择项目。"}</p><button data-stage="input">返回产品需求输入</button></section>`;
 }
 
+function boardPage() {
+  const board = state.project?.visual_dashboard;
+  if (!board) return `<section class="placeholder-page"><p class="eyebrow">第三阶段</p><h1>视觉看板</h1><p>根据已确认资料、市场分析和视觉策划规则手动生成。</p><button id="start-visual-board">生成视觉看板</button></section>`;
+  return `<section class="research-page"><header class="page-header"><p class="eyebrow">第三阶段</p><h1>视觉看板</h1><p>仅可编辑文字内容，模块结构与采用图片记录保持不变。</p></header><form id="visual-board-form">${board.sections.map((section, index) => `<section class="evidence-row"><input data-board-title="${index}" value="${escapeHtml(section.title)}"/><textarea data-board-content="${index}" placeholder="填写此模块的视觉策划内容">${escapeHtml(section.content)}</textarea></section>`).join("")}<button>保存看板修改</button></form></section>`;
+}
+
 function researchPage() {
   const understanding = state.project?.product_understanding;
   if (!understanding) return `<section class="placeholder-page"><p class="eyebrow">第二阶段前置确认</p><h1>规则校验与设计调研</h1><p>产品理解会读取当前版本的 Markdown 资料，并生成待确认的产品事实与卖点证据。</p><button id="start-understanding">启动产品理解</button></section>`;
@@ -134,7 +140,7 @@ function marketControls() {
 
 function render() {
   const stage = currentStage();
-  const body = state.loading ? `<div class="loading">正在读取本地项目</div>` : state.error ? `<div class="error-state"><h2>无法读取本地服务</h2><p>${escapeHtml(state.error)}</p><button id="retry">重新连接</button></div>` : stage === "input" ? inputPage() : stage === "research" ? researchPage() : lockedPage(stage);
+  const body = state.loading ? `<div class="loading">正在读取本地项目</div>` : state.error ? `<div class="error-state"><h2>无法读取本地服务</h2><p>${escapeHtml(state.error)}</p><button id="retry">重新连接</button></div>` : stage === "input" ? inputPage() : stage === "research" ? researchPage() : stage === "board" ? boardPage() : lockedPage(stage);
   app.innerHTML = `<header class="topbar"><a class="brand" href="#stage=input">服装视觉设计分析</a><nav>${navItem("input", "产品输入", "01")}${navItem("research", "规则校验与调研", "02")}${navItem("board", "视觉看板", "03")}</nav><div class="top-status">${state.project ? "本地已保存" : "等待项目"}</div></header><main>${body}</main>`;
   bindEvents();
 }
@@ -208,6 +214,16 @@ function bindEvents() {
   document.querySelector("#image-review-form")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const reviews = Object.fromEntries([...document.querySelectorAll("[data-image-id]")].map((select) => [select.dataset.imageId, select.value]));
     try { await request(`/api/projects/${state.project.project_id}/image-candidates`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviews }) }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
+  });
+  document.querySelector("#start-visual-board")?.addEventListener("click", async (event) => {
+    event.currentTarget.disabled = true; event.currentTarget.textContent = "正在生成";
+    try { await request(`/api/projects/${state.project.project_id}/visual-dashboard/start`, { method: "POST" }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
+  });
+  document.querySelector("#visual-board-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const board = structuredClone(state.project.visual_dashboard);
+    document.querySelectorAll("[data-board-title]").forEach((input) => { board.sections[input.dataset.boardTitle].title = input.value; });
+    document.querySelectorAll("[data-board-content]").forEach((input) => { board.sections[input.dataset.boardContent].content = input.value; });
+    try { await request(`/api/projects/${state.project.project_id}/visual-dashboard`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(board) }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
   });
 }
 
