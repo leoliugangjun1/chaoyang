@@ -1,5 +1,5 @@
 const app = document.querySelector("#app");
-const state = { projects: [], project: null, loading: true, error: "" };
+const state = { projects: [], project: null, rules: [], loading: true, error: "" };
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#039;", '"': "&quot;",
@@ -33,6 +33,7 @@ async function loadProjects() {
   try {
     const data = await request("/api/projects");
     state.projects = data.projects;
+    state.rules = (await request("/api/rules")).rules;
     const projectId = selectedProjectId();
     state.project = projectId ? await request(`/api/projects/${projectId}`) : null;
   } catch (error) {
@@ -68,8 +69,20 @@ function inputPage() {
       <header class="page-header"><p class="eyebrow">第一阶段</p><h1>产品需求输入</h1><p>建立本地项目，保存产品资料并准备产品理解。</p></header>
       <section class="work-section"><h2>创建项目</h2><form id="project-form" class="inline-form"><input name="name" required maxlength="100" placeholder="项目名称" aria-label="项目名称" /><button>创建项目</button></form></section>
       <section class="work-section ${state.project ? "" : "disabled-section"}"><h2>产品资料</h2><p>支持 Markdown、Excel 和图片。上传会生成新的项目版本。</p><form id="upload-form"><input id="file-input" name="files" type="file" multiple accept=".md,.markdown,.xlsx,.jpg,.jpeg,.png,.webp,.gif" ${state.project ? "" : "disabled"}/><button ${state.project ? "" : "disabled"}>保存资料</button></form>${state.project ? fileList() : ""}</section>
+      <section class="work-section ${state.project ? "" : "disabled-section"}"><h2>当前规则</h2><p>规则原文按版本保存。每类规则只可选择一条。</p>${ruleControls()}</section>
     </div>
   </section>`;
+}
+
+const ruleTypes = [
+  ["product_validation", "产品事实校验"],
+  ["image_search", "图片搜索"],
+  ["visual_planning", "视觉策划"],
+];
+
+function ruleControls() {
+  const bindings = state.project?.rule_bindings || {};
+  return `<form id="rule-binding-form" class="rule-grid">${ruleTypes.map(([type, label]) => `<label>${label}<select name="${type}" ${state.project ? "" : "disabled"}><option value="">暂不选择</option>${state.rules.filter((rule) => rule.rule_type === type).map((rule) => `<option value="${rule.rule_id}" ${bindings[type]?.rule_id === rule.rule_id ? "selected" : ""}>${escapeHtml(rule.name)} · ${escapeHtml(rule.version)}</option>`).join("")}</select></label>`).join("")}<button ${state.project ? "" : "disabled"}>保存规则绑定</button></form><form id="rule-upload-form" class="inline-form rule-upload"><input name="name" required maxlength="100" placeholder="规则名称" ${state.project ? "" : "disabled"}/><select name="rule_type" ${state.project ? "" : "disabled"}>${ruleTypes.map(([type, label]) => `<option value="${type}">${label}</option>`).join("")}</select><input name="file" type="file" accept=".md,.markdown" required ${state.project ? "" : "disabled"}/><button ${state.project ? "" : "disabled"}>保存新规则</button></form>`;
 }
 
 function fileList() {
@@ -103,6 +116,15 @@ function bindEvents() {
     if (!formData.getAll("files").some((file) => file.size)) { state.error = "请选择至少一个文件"; render(); return; }
     button.disabled = true; button.textContent = "正在保存";
     try { await request(`/api/projects/${state.project.project_id}/files`, { method: "POST", body: formData }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
+  });
+  document.querySelector("#rule-binding-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const button = event.currentTarget.querySelector("button"); button.disabled = true; button.textContent = "正在保存";
+    const bindings = Object.fromEntries([...new FormData(event.currentTarget).entries()].filter(([, value]) => value));
+    try { await request(`/api/projects/${state.project.project_id}/rules`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bindings }) }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
+  });
+  document.querySelector("#rule-upload-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget); const file = form.get("file"); const button = event.currentTarget.querySelector("button"); button.disabled = true; button.textContent = "正在保存";
+    try { await request("/api/rules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: form.get("name"), rule_type: form.get("rule_type"), content: await file.text() }) }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
   });
 }
 

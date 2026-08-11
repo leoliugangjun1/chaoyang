@@ -9,7 +9,7 @@ import re
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from app.backend.storage import ProjectStore
 
@@ -25,7 +25,8 @@ class ApplicationHandler(BaseHTTPRequestHandler):
     server_version = "VisualResearchWorkbench/0.1"
 
     def do_GET(self) -> None:  # noqa: N802
-        request_path = urlparse(self.path).path
+        parsed_url = urlparse(self.path)
+        request_path = parsed_url.path
         if request_path == "/api/health":
             self._send_json(HTTPStatus.OK, {"status": "ok", "service": "local"})
             return
@@ -39,6 +40,13 @@ class ApplicationHandler(BaseHTTPRequestHandler):
 
         if request_path == "/api/projects":
             self._send_json(HTTPStatus.OK, {"projects": PROJECT_STORE.list_projects()})
+            return
+
+        if request_path == "/api/rules":
+            query = parse_qs(parsed_url.query)
+            rule_type = query.get("type", [None])[0]
+            include_archived = query.get("include_archived", ["false"])[0] == "true"
+            self._send_json(HTTPStatus.OK, {"rules": PROJECT_STORE.list_rules(rule_type, include_archived)})
             return
 
         project_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})", request_path)
@@ -65,10 +73,31 @@ class ApplicationHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.CREATED, project)
                 return
 
+            if request_path == "/api/rules":
+                payload = self._read_json()
+                rule = PROJECT_STORE.create_rule(
+                    str(payload.get("name", "")),
+                    str(payload.get("rule_type", "")),
+                    str(payload.get("content", "")),
+                    str(payload.get("version", "1.0")),
+                )
+                self._send_json(HTTPStatus.CREATED, rule)
+                return
+
             upload_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/files", request_path)
             if upload_match:
                 project = PROJECT_STORE.save_uploads(upload_match.group(1), self._read_multipart_files())
                 self._send_json(HTTPStatus.CREATED, project)
+                return
+
+            bindings_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/rules", request_path)
+            if bindings_match:
+                payload = self._read_json()
+                bindings = payload.get("bindings", {})
+                if not isinstance(bindings, dict) or not all(isinstance(value, str) for value in bindings.values()):
+                    raise ValueError("规则绑定格式无效")
+                project = PROJECT_STORE.bind_rules(bindings_match.group(1), bindings)
+                self._send_json(HTTPStatus.OK, project)
                 return
 
             self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
@@ -79,6 +108,17 @@ class ApplicationHandler(BaseHTTPRequestHandler):
         except Exception as error:  # noqa: BLE001
             print(f"服务错误：{error}")
             self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"message": "本地文件保存失败"})
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        request_path = urlparse(self.path).path
+        archive_match = re.fullmatch(r"/api/rules/([a-f0-9]{32})/archive", request_path)
+        if archive_match is None:
+            self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
+            return
+        try:
+            self._send_json(HTTPStatus.OK, PROJECT_STORE.archive_rule(archive_match.group(1)))
+        except LookupError as error:
+            self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
 
     def _read_json(self) -> dict[str, object]:
         content_type = self.headers.get("Content-Type", "")
