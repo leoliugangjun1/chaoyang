@@ -82,7 +82,8 @@ const ruleTypes = [
 
 function ruleControls() {
   const bindings = state.project?.rule_bindings || {};
-  return `<form id="rule-binding-form" class="rule-grid">${ruleTypes.map(([type, label]) => `<label>${label}<select name="${type}" ${state.project ? "" : "disabled"}><option value="">暂不选择</option>${state.rules.filter((rule) => rule.rule_type === type).map((rule) => `<option value="${rule.rule_id}" ${bindings[type]?.rule_id === rule.rule_id ? "selected" : ""}>${escapeHtml(rule.name)} · ${escapeHtml(rule.version)}</option>`).join("")}</select></label>`).join("")}<button ${state.project ? "" : "disabled"}>保存规则绑定</button></form><form id="rule-upload-form" class="inline-form rule-upload"><input name="name" required maxlength="100" placeholder="规则名称" ${state.project ? "" : "disabled"}/><select name="rule_type" ${state.project ? "" : "disabled"}>${ruleTypes.map(([type, label]) => `<option value="${type}">${label}</option>`).join("")}</select><input name="file" type="file" accept=".md,.markdown" required ${state.project ? "" : "disabled"}/><button ${state.project ? "" : "disabled"}>保存新规则</button></form>`;
+  const typeLabel = Object.fromEntries(ruleTypes);
+  return `<form id="rule-binding-form" class="rule-grid">${ruleTypes.map(([type, label]) => `<label>${label}<select name="${type}" ${state.project ? "" : "disabled"}><option value="">暂不选择</option>${state.rules.filter((rule) => rule.rule_type === type).map((rule) => `<option value="${rule.rule_id}" ${bindings[type]?.rule_id === rule.rule_id ? "selected" : ""}>${escapeHtml(rule.name)} · ${escapeHtml(rule.version)}</option>`).join("")}</select></label>`).join("")}<button ${state.project ? "" : "disabled"}>保存规则绑定</button></form><form id="rule-upload-form" class="inline-form rule-upload"><input id="rule-name-input" name="name" required maxlength="100" placeholder="规则名称" ${state.project ? "" : "disabled"}/><select name="rule_type" ${state.project ? "" : "disabled"}>${ruleTypes.map(([type, label]) => `<option value="${type}">${label}</option>`).join("")}</select><input id="rule-file-input" name="file" type="file" accept=".md,.markdown" required ${state.project ? "" : "disabled"}/><button ${state.project ? "" : "disabled"}>保存新规则</button></form><div class="saved-rules"><h3>规则名称</h3>${state.rules.length ? state.rules.map((rule) => `<form class="rule-name-form" data-rule-id="${rule.rule_id}"><input name="name" value="${escapeHtml(rule.name)}" aria-label="${escapeHtml(rule.name)} 的规则名称"/><small>${escapeHtml(typeLabel[rule.rule_type])} · ${escapeHtml(rule.version)}</small><button>保存名称</button></form>`).join("") : "<p class=empty-copy>尚未保存规则。</p>"}</div>`;
 }
 
 function fileList() {
@@ -151,6 +152,14 @@ function bindEvents() {
     event.preventDefault(); const form = new FormData(event.currentTarget); const file = form.get("file"); const button = event.currentTarget.querySelector("button"); button.disabled = true; button.textContent = "正在保存";
     try { await request("/api/rules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: form.get("name"), rule_type: form.get("rule_type"), content: await file.text() }) }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
   });
+  document.querySelector("#rule-file-input")?.addEventListener("change", (event) => {
+    const file = event.target.files[0];
+    if (file) document.querySelector("#rule-name-input").value = file.name.replace(/\.(md|markdown)$/i, "");
+  });
+  document.querySelectorAll(".rule-name-form").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault(); const button = event.currentTarget.querySelector("button"); button.disabled = true; button.textContent = "正在保存";
+    try { await request(`/api/rules/${event.currentTarget.dataset.ruleId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: new FormData(event.currentTarget).get("name") }) }); await loadProjects(); } catch (error) { state.error = error.message; render(); }
+  }));
 }
 
 window.addEventListener("hashchange", loadProjects);

@@ -191,6 +191,16 @@ class ProjectStore:
             connection.execute("UPDATE rules SET status = 'archived', source_markdown_path = ? WHERE rule_id = ?", (str(destination.relative_to(APP_ROOT).as_posix()), rule_id))
         return self.get_rule(rule_id) or rule
 
+    def update_rule_name(self, rule_id: str, name: str) -> dict[str, Any]:
+        name = name.strip()
+        if not name:
+            raise ValueError("规则名称不能为空")
+        if self.get_rule(rule_id) is None:
+            raise LookupError("未找到对应规则")
+        with self._connection() as connection:
+            connection.execute("UPDATE rules SET name = ? WHERE rule_id = ?", (name, rule_id))
+        return self.get_rule(rule_id) or {}
+
     def bind_rules(self, project_id: str, bindings: dict[str, str]) -> dict[str, Any]:
         project = self.get_project(project_id)
         if project is None:

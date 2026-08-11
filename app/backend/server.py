@@ -111,6 +111,16 @@ class ApplicationHandler(BaseHTTPRequestHandler):
 
     def do_PATCH(self) -> None:  # noqa: N802
         request_path = urlparse(self.path).path
+        rename_match = re.fullmatch(r"/api/rules/([a-f0-9]{32})", request_path)
+        if rename_match:
+            try:
+                payload = self._read_json()
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.update_rule_name(rename_match.group(1), str(payload.get("name", ""))))
+            except ValueError as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            except LookupError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
+            return
         archive_match = re.fullmatch(r"/api/rules/([a-f0-9]{32})/archive", request_path)
         if archive_match is None:
             self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
