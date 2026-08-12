@@ -1,0 +1,132 @@
+{
+  "review_id": "NC3634A-visual-admission-20260812",
+  "admission_status": "rejected",
+  "source_path": [
+    "产品营销资料对接包: （2）产品营销对接资料包!A2:I39",
+    "产品说明书: （3）产品说明书（关键信息上BOM）!A3:L34",
+    "产品说明书: （3）产品说明书（关键信息上BOM）!A39:L73",
+    "GTM: （8）完整GTM（销售）!A4:N47",
+    "市场洞察: (2)营销打法调研（市场洞察）!A2:BH19"
+  ],
+  "hard_fail_checks": [
+    {
+      "rule_id": "model_version",
+      "hard_fail": false,
+      "finding": "NC3634A 可定位；GTM 使用 NC3634 作为 SPU，未说明二者范围关系，需人工确认。",
+      "source_refs": [
+        "（3）产品说明书（关键信息上BOM）!C2",
+        "（8）完整GTM（销售）!A5"
+      ]
+    },
+    {
+      "rule_id": "core_claim_evidence",
+      "hard_fail": true,
+      "finding": "五条核心功能卖点仅有结构/营销描述、图示计划或 VOC 线索，未见可定位的 NC3634A 测试、质检或专业报告来验证收腹、防卷、保暖、不掉档或提臀结论。",
+      "source_refs": [
+        "（2）产品营销对接资料包!D27:H31",
+        "（2）产品营销对接资料包!D37:E39",
+        "（3）产品说明书（关键信息上BOM）!B15:K19",
+        "（3）产品说明书（关键信息上BOM）!B52:L60"
+      ]
+    },
+    {
+      "rule_id": "cross_document_conflict",
+      "hard_fail": true,
+      "finding": "同一 NC3634A 的下单尺码存在 S-2XL 与 S-XL 两种不一致表述。",
+      "source_refs": [
+        "（3）产品说明书（关键信息上BOM）!K4",
+        "（3）产品说明书（关键信息上BOM）!B28:L32",
+        "（3）产品说明书（关键信息上BOM）!K43",
+        "（2）产品营销对接资料包!E30"
+      ]
+    }
+  ],
+  "completeness": {
+    "marketing_score": 80,
+    "manual_score": 13.3,
+    "raw_score": 93.3,
+    "audited_max_score": 95,
+    "audited_completeness_percent": 98.2,
+    "unreviewed_weight": 5,
+    "missing_fields": [
+      "产品说明书：未提供本产品质检/验证信息",
+      "产品说明书：制单实际平铺尺寸、仓库入库大货尺寸、洗水唛/码唛资料未填写"
+    ]
+  },
+  "usp_voc_brief": "VOC 与竞对资料反映用户关注破损、卷边、保暖、自然透肤与尺码准确，和 NC3634A 的卖点方向相关；这仅说明市场相关性，不能证明本产品具备收腹、防卷、保暖、高弹不掉档或提臀效果。",
+  "findings": [
+    {
+      "category": "核心卖点证据",
+      "status": "fail",
+      "finding": "收腹、防卷、不滑脱、保暖、高弹不掉档和提臀等功能结论均未见本产品 A 级测试/质检/专业报告；现有结构描述属于 B 级事实，营销描述属于 C 级主张。",
+      "source_refs": [
+        "（2）产品营销对接资料包!D27:H31",
+        "（3）产品说明书（关键信息上BOM）!B15:K19",
+        "（3）产品说明书（关键信息上BOM）!B52:L56"
+      ],
+      "required_action": "逐项补充适用于 NC3634A 的报告编号、样品、方法、判定标准和结论；补齐前只保留结构、材质和可见外观事实。",
+      "owner_role": "质量或研发"
+    },
+    {
+      "category": "跨资料一致性",
+      "status": "fail",
+      "finding": "基础产品说明书及营销资料写 S-2XL，卖点说明书写 S-XL。",
+      "source_refs": [
+        "（3）产品说明书（关键信息上BOM）!K4",
+        "（3）产品说明书（关键信息上BOM）!K43",
+        "（2）产品营销对接资料包!E30"
+      ],
+      "required_action": "确认最终可售尺码并同步修订所有产品、营销、GTM 与视觉尺码表资料。",
+      "owner_role": "产品负责人"
+    },
+    {
+      "category": "RTB",
+      "status": "risk",
+      "finding": "RTB 字段填写“机洗实验报告”，但分块内容未提供附件、链接、报告编号或结果，不能用作功能验证依据。",
+      "source_refs": [
+        "（2）产品营销对接资料包!D37:E39"
+      ],
+      "required_action": "提供可复核的报告附件、链接或编号，并标明样品、方法、循环次数、判定标准与结论。",
+      "owner_role": "质量或研发"
+    },
+    {
+      "category": "产品范围",
+      "status": "uncertain",
+      "finding": "产品说明书为 NC3634A，GTM 产品 SPU 为 NC3634；资料未说明二者父子款或版本映射。",
+      "source_refs": [
+        "（3）产品说明书（关键信息上BOM）!C2",
+        "（8）完整GTM（销售）!A5"
+      ],
+      "required_action": "补充 NC3634 与 NC3634A 的 SPU/款号/版本关系，确认 GTM 计划专属适用于 NC3634A。",
+      "owner_role": "产品负责人"
+    },
+    {
+      "category": "Slogan、场景与流量词",
+      "status": "risk",
+      "finding": "Slogan、五点描述及 tummy control、thermal、butt lift 流量词含未验证功能；三个主场景与人群相关，但以功能效果作为场景承诺时存在超证据风险。",
+      "source_refs": [
+        "（2）产品营销对接资料包!E21:E24",
+        "（2）产品营销对接资料包!D34:G36",
+        "（8）完整GTM（销售）!F17:F39",
+        "（8）完整GTM（销售）!E139:E153"
+      ],
+      "required_action": "验证完成前，以品类、结构、尺码、色彩与真实穿搭信息为主；将功能型流量词设为待审核投放词。",
+      "owner_role": "市场/GTM"
+    },
+    {
+      "category": "视觉可展示",
+      "status": "feasible",
+      "finding": "双层结构、6.5cm 腰头、V 字缝线、成分、220G、颜色与尺码可通过实物、量测、平铺和真人穿搭真实展示；这些画面不能替代功能测试。",
+      "source_refs": [
+        "（3）产品说明书（关键信息上BOM）!B9:L9",
+        "（3）产品说明书（关键信息上BOM）!B15:K19",
+        "（3）产品说明书（关键信息上BOM）!B25:L32"
+      ],
+      "required_action": "制作实物结构特写、腰头量测、拉伸过程、不同尺码模特和真实场景穿搭；禁用夸张变形及未经验证的前后对比。",
+      "owner_role": "视觉负责人"
+    }
+  ],
+  "manual_review_reasons": [
+    "NC3634 与 NC3634A 的范围关系未被资料明确说明。"
+  ]
+}

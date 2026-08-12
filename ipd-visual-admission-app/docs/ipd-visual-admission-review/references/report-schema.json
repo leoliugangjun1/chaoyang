@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "IPD Visual Admission Report",
+  "type": "object",
+  "required": ["review_id", "admission_status", "source_path", "hard_fail_checks", "completeness", "usp_voc_brief", "findings"],
+  "properties": {
+    "review_id": {"type": "string"},
+    "admission_status": {"enum": ["approved", "conditional_approval", "rejected", "manual_review"]},
+    "source_path": {"type": "array", "items": {"type": "string"}},
+    "hard_fail_checks": {"type": "array", "items": {"type": "object", "required": ["rule_id", "hard_fail", "finding", "source_refs"], "properties": {"rule_id": {"type": "string"}, "hard_fail": {"type": "boolean"}, "finding": {"type": "string"}, "source_refs": {"type": "array", "items": {"type": "string"}}}}},
+    "completeness": {"type": "object", "required": ["marketing_score", "manual_score", "raw_score", "audited_max_score", "audited_completeness_percent", "unreviewed_weight", "missing_fields"], "properties": {"marketing_score": {"type": "number", "minimum": 0, "maximum": 80}, "manual_score": {"type": "number", "minimum": 0, "maximum": 15}, "raw_score": {"type": "number", "minimum": 0, "maximum": 95}, "audited_max_score": {"const": 95}, "audited_completeness_percent": {"type": "number", "minimum": 0, "maximum": 100}, "unreviewed_weight": {"const": 5}, "missing_fields": {"type": "array", "items": {"type": "string"}}}},
+    "usp_voc_brief": {"type": "string", "maxLength": 200},
+    "findings": {"type": "array", "items": {"type": "object", "required": ["category", "status", "finding", "source_refs", "required_action", "owner_role"], "properties": {"category": {"type": "string"}, "status": {"enum": ["pass", "risk", "fail", "uncertain", "feasible", "difficult", "not_feasible"]}, "finding": {"type": "string"}, "source_refs": {"type": "array", "items": {"type": "string"}}, "required_action": {"type": "string"}, "owner_role": {"type": "string"}}}},
+    "manual_review_reasons": {"type": "array", "items": {"type": "string"}}
+  }
+}

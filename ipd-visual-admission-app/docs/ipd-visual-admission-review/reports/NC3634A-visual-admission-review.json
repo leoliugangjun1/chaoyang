@@ -1,0 +1,141 @@
+{
+  "review_id": "NC3634A-visual-admission-20260812-recalculated",
+  "admission_status": "rejected",
+  "source_path": [
+    "产品营销资料对接包: （2）产品营销对接资料包!A1:I44",
+    "产品说明书: （3）产品说明书（关键信息上BOM）!A1:T73",
+    "GTM: （8）完整GTM（销售）!A1:AA414",
+    "竞对与市场洞察: (2)营销打法调研（市场洞察）!A1:BH19"
+  ],
+  "hard_fail_checks": [
+    {
+      "rule_id": "model_version",
+      "hard_fail": false,
+      "finding": "NC3634A 可定位；GTM 使用 NC3634（SPU），二者关系未明，需确认。",
+      "source_refs": [
+        "（3）产品说明书（关键信息上BOM）!C2",
+        "（8）完整GTM（销售）!A5"
+      ]
+    },
+    {
+      "rule_id": "core_claim_evidence",
+      "hard_fail": true,
+      "finding": "五条核心卖点有产品说明或展示设想，但未提供可追溯的本产品测试/质检报告来验证收腹、防卷、保暖、高弹不掉档、提臀等功能结论。",
+      "source_refs": [
+        "（2）产品营销对接资料包!D27:H31",
+        "（2）产品营销对接资料包!D37:E44",
+        "（3）产品说明书（关键信息上BOM）!B15:K19",
+        "（3）产品说明书（关键信息上BOM）!D52:J56"
+      ]
+    },
+    {
+      "rule_id": "cross_document_conflict",
+      "hard_fail": true,
+      "finding": "同一产品资料中下单尺码范围存在 S-2XL 与 S-XL 两种不一致表述。",
+      "source_refs": [
+        "（2）产品营销对接资料包!E30",
+        "（3）产品说明书（关键信息上BOM）!K4",
+        "（3）产品说明书（关键信息上BOM）!K43"
+      ]
+    }
+  ],
+  "completeness": {
+    "marketing_score": 80,
+    "manual_score": 13.3,
+    "raw_score": 93.3,
+    "audited_max_score": 95,
+    "audited_completeness_percent": 98.2,
+    "unreviewed_weight": 5,
+    "missing_fields": [
+      "产品说明书：未提供本产品质检/验证信息",
+      "产品说明书：制单实际平铺尺寸、入库大货尺寸、洗水唛/码唛资料未填写"
+    ]
+  },
+  "usp_voc_brief": "VOC 与竞对资料支持用户重视防破、腰头不卷、保暖、自然透肤、尺码准确等需求，和五条 USP 方向相关；但其仅能说明市场机会，不能证明 NC3634A 具备收腹、防卷、保暖、高弹或提臀功能。",
+  "findings": [
+    {
+      "category": "核心卖点证据",
+      "status": "fail",
+      "finding": "高腰双层收腹、加宽防卷腰头仅有结构描述及计划拍摄项；没有腰头卷边、滑脱或收腹效果的本产品测试/质检证据。",
+      "source_refs": [
+        "（2）产品营销对接资料包!D27:H27",
+        "（3）产品说明书（关键信息上BOM）!B15:K15",
+        "（3）产品说明书（关键信息上BOM）!D52:J53"
+      ],
+      "required_action": "提供可定位的本产品结构/尺寸资料，以及卷边、滑脱和收腹相关测试或质检记录；未补齐前，将对外功能结论降级为可见结构事实。",
+      "owner_role": "质量或研发"
+    },
+    {
+      "category": "核心卖点证据",
+      "status": "fail",
+      "finding": "逼真假透肉保暖、高弹包容不掉档、隐形提臀均无本产品的功能测试或质检报告；竞品/VOC 与营销话术不能替代验证。",
+      "source_refs": [
+        "（2）产品营销对接资料包!D29:H31",
+        "（3）产品说明书（关键信息上BOM）!B17:K19",
+        "（3）产品说明书（关键信息上BOM）!D54:J56"
+      ],
+      "required_action": "分别补充保暖、拉伸回弹/掉档、提臀或版型效果的本产品测试证据；每份证据需有报告编号、适用样品和可复核结论。",
+      "owner_role": "质量或研发"
+    },
+    {
+      "category": "跨资料一致性",
+      "status": "fail",
+      "finding": "下单尺码在主产品说明书和营销资料为 S-2XL，在卖点说明书为 S-XL；该差异会影响视觉尺码表、Listing 和下单资料。",
+      "source_refs": [
+        "（2）产品营销对接资料包!E30",
+        "（3）产品说明书（关键信息上BOM）!K4",
+        "（3）产品说明书（关键信息上BOM）!K43"
+      ],
+      "required_action": "由产品负责人确认最终可售尺码，并同步修订所有涉及尺码的产品说明、卖点说明、前端尺码表、GTM 和视觉任务。",
+      "owner_role": "产品负责人"
+    },
+    {
+      "category": "产品范围",
+      "status": "uncertain",
+      "finding": "产品说明书型号为 NC3634A，GTM 产品 SPU 为 NC3634；现有字段未说明两者的父子/版本关系。",
+      "source_refs": [
+        "（3）产品说明书（关键信息上BOM）!C2",
+        "（8）完整GTM（销售）!A5"
+      ],
+      "required_action": "在 GTM 中补充款号与 SPU 的映射或版本说明，确认该计划专属适用于 NC3634A。",
+      "owner_role": "产品负责人"
+    },
+    {
+      "category": "RTB",
+      "status": "risk",
+      "finding": "RTB 字段已填写“机洗实验报告”及 ISO 6330:2021 洗涤方法，可计入字段完整度；但未见报告附件、编号或结果页，不能作为功能验证依据。",
+      "source_refs": [
+        "（2）产品营销对接资料包!D37:E44"
+      ],
+      "required_action": "补入测试报告或可追溯链接，并标明样品、方法、循环次数、判定标准和结论。",
+      "owner_role": "质量或研发"
+    },
+    {
+      "category": "视觉可展示",
+      "status": "feasible",
+      "finding": "双层结构、6.5cm 腰头、面料成分、尺码和穿搭方式可通过实物、量测、平铺及真人穿着如实展示；功能效果不能由视觉替代验证。",
+      "source_refs": [
+        "（2）产品营销对接资料包!D27:H30",
+        "（3）产品说明书（关键信息上BOM）!E15:K18",
+        "（3）产品说明书（关键信息上BOM）!B26:L32"
+      ],
+      "required_action": "拍摄实物结构特写、腰头量测、拉伸过程、各尺码真实模特上身和四套穿搭；无测试证据时不把画面描述为已证实的收腹、防卷或保暖效果。",
+      "owner_role": "视觉负责人"
+    },
+    {
+      "category": "场景与流量词",
+      "status": "risk",
+      "finding": "通勤、休闲和社交场景与产品定位相关；但“butt lift”“tummy control”等流量词对应的功能尚未验证，不应作为视觉主承诺。",
+      "source_refs": [
+        "（2）产品营销对接资料包!D34:G36",
+        "（8）完整GTM（销售）!C5",
+        "（8）完整GTM（销售）!E141:E148"
+      ],
+      "required_action": "在功能验证完成前，广告与视觉以品类、结构、尺码和可见穿搭信息为主；将未验证功能词标为待审核投放词。",
+      "owner_role": "市场/GTM"
+    }
+  ],
+  "manual_review_reasons": [
+    "NC3634 与 NC3634A 的范围关系未被资料明确说明。"
+  ]
+}
