@@ -82,6 +82,10 @@ class ApplicationHandler(BaseHTTPRequestHandler):
             except LookupError as error:
                 self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
             return
+        reports_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/admission-reports", request_path)
+        if reports_match:
+            self._send_json(HTTPStatus.OK, {"reports": PROJECT_STORE.list_reports(reports_match.group(1))})
+            return
         if request_path.startswith("/api/"):
             self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
             return
@@ -127,6 +131,20 @@ class ApplicationHandler(BaseHTTPRequestHandler):
             return
         try:
             self._send_json(HTTPStatus.OK, PROJECT_STORE.cancel_task(match.group(1), match.group(2)))
+        except LookupError as error:
+            self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
+
+    def do_PUT(self) -> None:  # noqa: N802
+        match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/validation-tasks/([a-f0-9]{32})/retry", urlparse(self.path).path)
+        if match is None:
+            self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
+            return
+        try:
+            task = PROJECT_STORE.retry_task(match.group(1), match.group(2))
+            threading.Thread(target=_run_ac_task, args=(match.group(1), task["task_id"], task["file_version_id"]), daemon=True).start()
+            self._send_json(HTTPStatus.CREATED, task)
+        except ValueError as error:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
         except LookupError as error:
             self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
 
@@ -229,6 +247,8 @@ def _run_ac_task(project_id: str, task_id: str, file_version_id: str) -> None:
         if not isinstance(snapshot, dict):
             raise ValueError("解析快照为空")
         for index, stage in enumerate(STAGES, start=1):
+            if PROJECT_STORE.get_task(project_id, task_id)["status"] == "cancelled":
+                return
             PROJECT_STORE.update_task(task_id, stage=stage, status="running", progress=(index - 1) * 33)
             result = {"locating": locate, "hard_fail": hard_fail, "completeness": completeness, "claims": claims, "visualization": visualization, "communication": communication}[stage](snapshot)
             PROJECT_STORE.save_stage_result(task_id, stage, result)

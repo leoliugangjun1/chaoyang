@@ -335,8 +335,18 @@ class ProjectStore:
 
     def cancel_task(self, project_id: str, task_id: str) -> dict[str, Any]:
         self.get_task(project_id, task_id)
+        with closing(self._connect()) as connection:
+            connection.execute("DELETE FROM stage_results WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM admission_reports WHERE task_id = ?", (task_id,))
+            connection.commit()
         self.update_task(task_id, stage="cancelled", status="cancelled", progress=0, error_code="TASK_CANCELLED")
         return self.get_task(project_id, task_id)
+
+    def retry_task(self, project_id: str, task_id: str) -> dict[str, Any]:
+        task = self.get_task(project_id, task_id)
+        if task["status"] not in {"failed", "manual_review"}:
+            raise ValueError("只有失败或待人工确认任务可以重试")
+        return self.create_validation_task(project_id, task["file_version_id"])
 
     def save_report(self, project_id: str, task_id: str, report: dict[str, Any], markdown: str) -> dict[str, Any]:
         review_id = str(report["review_id"])
@@ -354,3 +364,11 @@ class ProjectStore:
         if row is None:
             raise LookupError("未找到对应准入报告")
         return {"report": json.loads(row["report_json"]), "markdown": row["report_markdown"]}
+
+    def list_reports(self, project_id: str) -> list[dict[str, Any]]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT review_id, task_id, created_at, json_extract(report_json, '$.admission_status') AS admission_status FROM admission_reports WHERE project_id = ? ORDER BY created_at DESC",
+                (project_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]

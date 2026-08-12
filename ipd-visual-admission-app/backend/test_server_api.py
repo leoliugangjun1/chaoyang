@@ -79,6 +79,21 @@ class ServerApiTest(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertIn("IPD 产品视觉准入报告", markdown)
 
+    def test_cancelled_task_clears_intermediate_results_and_history_is_empty(self) -> None:
+        _, project = self._request_json("POST", "/api/projects", {"name": "取消验证项目"})
+        project_id = project["project_id"]
+        _, skills = self._request_json("GET", "/api/skills")
+        self._request_json("POST", f"/api/projects/{project_id}/skills", {"skill_id": skills["skills"][0]["skill_id"]})
+        _, uploaded = self._upload(project_id, "审核资料.xlsx", self._workbook_bytes())
+        _, task = self._request_json("POST", f"/api/projects/{project_id}/validation-tasks", {"file_version_id": uploaded["file_version_id"]})
+        status, cancelled = self._request_json("DELETE", f"/api/projects/{project_id}/validation-tasks/{task['task_id']}")
+        self.assertEqual(status, 200)
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertEqual(cancelled["stage_results"], {})
+        status, history = self._request_json("GET", f"/api/projects/{project_id}/admission-reports")
+        self.assertEqual(status, 200)
+        self.assertEqual(history["reports"], [])
+
     def _request_json(self, method: str, path: str, payload: dict[str, object] | None = None) -> tuple[int, dict[str, object]]:
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
         connection = HTTPConnection("127.0.0.1", self.httpd.server_port, timeout=10)

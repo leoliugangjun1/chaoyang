@@ -23,6 +23,7 @@ export default function HomePage() {
   const [task, setTask] = useState<Task | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [findingFilter, setFindingFilter] = useState("all");
+  const [history, setHistory] = useState<{ review_id: string; admission_status: string; created_at: string }[]>([]);
 
   const load = async () => {
     setState("loading");
@@ -36,6 +37,10 @@ export default function HomePage() {
       const skillPayload = (await skillResponse.json()) as { skills: Skill[] };
       setSkills(skillPayload.skills);
       setSelectedSkill(skillPayload.skills[0]?.skill_id ?? "");
+      if (selectedProject) {
+        const historyResponse = await fetch(`/api/projects/${selectedProject.project_id}/admission-reports`);
+        if (historyResponse.ok) setHistory(((await historyResponse.json()) as { reports: typeof history }).reports);
+      }
       setState("ready");
     } catch {
       setState("error");
@@ -110,7 +115,7 @@ export default function HomePage() {
         {state === "error" && <div className="state-block"><p>无法加载项目数据。</p><button type="button" onClick={() => void load()}>重试</button></div>}
         {state === "ready" && view === "input" && <div className="workspace">
           <section className="panel"><h2>创建审核项目</h2><div className="form-row"><input aria-label="项目名称" placeholder="项目名称" value={projectName} onChange={(event) => setProjectName(event.target.value)} /><button type="button" onClick={() => void createProject()} disabled={actionState === "loading" || !projectName.trim()}>创建项目</button></div></section>
-          <section className="panel"><h2>审核任务输入</h2><select aria-label="选择项目" value={selectedProject?.project_id ?? ""} onChange={(event) => setSelectedProject(projects.find((project) => project.project_id === event.target.value) ?? null)}><option value="">选择项目</option>{projects.map((project) => <option key={project.project_id} value={project.project_id}>{project.name}</option>)}</select><input aria-label="上传 Excel" type="file" accept=".xlsx" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} /><select aria-label="Skill 版本" value={selectedSkill} onChange={(event) => setSelectedSkill(event.target.value)}><option value="">选择 Skill 版本</option>{skills.map((skill) => <option key={skill.skill_id} value={skill.skill_id}>{skill.name} / {skill.version}</option>)}</select><button type="button" onClick={() => void uploadAndStart()} disabled={actionState === "loading" || !selectedProject || !selectedFile || !selectedSkill}>启动审核</button>{message && <p className="form-message">{message}</p>}</section>
+          <section className="panel"><h2>审核任务输入</h2><select aria-label="选择项目" value={selectedProject?.project_id ?? ""} onChange={(event) => setSelectedProject(projects.find((project) => project.project_id === event.target.value) ?? null)}><option value="">选择项目</option>{projects.map((project) => <option key={project.project_id} value={project.project_id}>{project.name}</option>)}</select><input aria-label="上传 Excel" type="file" accept=".xlsx" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} /><select aria-label="Skill 版本" value={selectedSkill} onChange={(event) => setSelectedSkill(event.target.value)}><option value="">选择 Skill 版本</option>{skills.map((skill) => <option key={skill.skill_id} value={skill.skill_id}>{skill.name} / {skill.version}</option>)}</select><button type="button" onClick={() => void uploadAndStart()} disabled={actionState === "loading" || !selectedProject || !selectedFile || !selectedSkill}>启动审核</button>{history.length > 0 && <div className="history-list"><h3>历史报告</h3>{history.map((item) => <div key={item.review_id}><span>{item.review_id}</span><strong>{item.admission_status}</strong></div>)}</div>}{message && <p className="form-message">{message}</p>}</section>
           {projects.length === 0 && <div className="empty-state"><h2>尚无审核项目</h2><p>创建项目并上传固定模板 Excel 后，可开始资料准入审核。</p></div>}
         </div>}
         {state === "ready" && view === "progress" && task && <section className="workspace"><div className="panel progress-panel"><div className="section-heading"><div><p className="eyebrow">任务 {task.task_id}</p><h2>{task.status === "manual_review" ? "待人工确认" : task.status === "cancelled" ? "已取消" : "审核进行中"}</h2></div><button type="button" onClick={() => void cancelTask()} disabled={actionState === "loading" || ["completed", "cancelled", "manual_review"].includes(task.status)}>取消任务</button></div><div className="progress-track"><span style={{ width: `${task.progress}%` }} /></div><div className="progress-meta"><strong>{task.progress}%</strong><span>当前阶段：{task.stage}</span></div>{task.error_code && <p className="form-message">错误：{task.error_code}</p>}{task.status === "manual_review" && <p className="form-message">系统无法完成可验证的审核，请人工复核来源、产品范围或输出格式。</p>}</div></section>}
