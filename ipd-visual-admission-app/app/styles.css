@@ -19,6 +19,9 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .eyebrow { color: var(--color-muted); font-size: 12px; margin: 0 0 4px; }
 h1 { font-size: 24px; font-weight: 650; margin: 0; }
 .local-tag { border: 1px solid var(--color-line); border-radius: 999px; color: var(--color-muted); font-size: 13px; padding: 5px 9px; }
+.topbar-actions, .view-nav, .section-heading, .progress-meta { align-items: center; display: flex; gap: 12px; }
+.view-nav button { background: transparent; border-color: var(--color-line); color: var(--color-ink); padding: 5px 9px; }
+.view-nav button.active { background: var(--color-ink); color: #fff; }
 .content { margin: 0 auto; max-width: 1040px; padding: 72px 24px; }
 .state-message, .state-block, .empty-state { background: var(--color-surface); border: 1px solid var(--color-line); border-radius: var(--radius); padding: 28px; }
 .state-message { color: var(--color-muted); }
@@ -32,5 +35,17 @@ h1 { font-size: 24px; font-weight: 650; margin: 0; }
 input, select { border: 1px solid var(--color-line); border-radius: var(--radius); background: #fff; color: var(--color-ink); font: inherit; min-height: 40px; padding: 8px 10px; }
 .form-row input { flex: 1; }
 .form-message { color: var(--color-muted); margin: 0; }
+.progress-panel { max-width: 760px; }
+.progress-track { background: var(--color-line); border-radius: 999px; height: 10px; overflow: hidden; }
+.progress-track span { background: #2f7658; display: block; height: 100%; transition: width 180ms ease; }
+.progress-meta { color: var(--color-muted); justify-content: space-between; }
+.progress-meta strong { color: var(--color-ink); font-size: 20px; }
+.report-view { display: grid; gap: 18px; }
+.report-status { align-items: center; border: 1px solid var(--color-line); border-left: 5px solid #68716e; background: var(--color-surface); display: flex; justify-content: space-between; padding: 24px; }
+.report-status h2 { font-size: 28px; margin: 0; }
+.status-approved { border-left-color: #2f7658; }.status-conditional_approval { border-left-color: #a8742a; }.status-rejected { border-left-color: #b44943; }.status-manual_review { border-left-color: #9a6d47; }
+.metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.metric-grid > div { background: var(--color-surface); border: 1px solid var(--color-line); border-radius: var(--radius); display: grid; gap: 8px; padding: 18px; }.metric-grid span { color: var(--color-muted); font-size: 13px; }.metric-grid strong { font-size: 20px; }
+.report-section { background: var(--color-surface); border: 1px solid var(--color-line); border-radius: var(--radius); padding: 20px; }.report-section h3 { margin: 0; }.hard-fail-row, .finding-row { border-top: 1px solid var(--color-line); display: grid; gap: 6px; margin-top: 14px; padding-top: 14px; }.hard-fail-row p, .finding-row p { margin: 0; line-height: 1.55; }.hard-fail-row small, .finding-row small { color: var(--color-muted); overflow-wrap: anywhere; }.finding-title { align-items: center; display: flex; gap: 8px; }.finding-status { border-radius: 999px; border: 1px solid var(--color-line); font-size: 12px; padding: 2px 7px; }.finding-fail { color: #b44943; }.finding-risk, .finding-difficult { color: #a8742a; }.finding-pass, .finding-feasible { color: #2f7658; }
 
-@media (max-width: 640px) { .topbar { min-height: 80px; padding: 16px 20px; } .content { padding: 40px 20px; } h1 { font-size: 21px; } .form-row { flex-direction: column; } }
+@media (max-width: 640px) { .topbar { align-items: flex-start; flex-direction: column; gap: 12px; min-height: 80px; padding: 16px 20px; } .topbar-actions { flex-wrap: wrap; } .content { padding: 40px 20px; } h1 { font-size: 21px; } .form-row { flex-direction: column; } .metric-grid { grid-template-columns: 1fr; } .report-status { align-items: flex-start; flex-direction: column; gap: 14px; } }
