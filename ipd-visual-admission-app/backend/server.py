@@ -14,6 +14,7 @@ from urllib.parse import unquote, urlparse
 
 from .storage import ProjectStore
 from .review_engine import STAGES, claims, communication, completeness, hard_fail, locate, run_review, visualization
+from .report_service import build_report, render_markdown
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +66,19 @@ class ApplicationHandler(BaseHTTPRequestHandler):
         if task_match:
             try:
                 self._send_json(HTTPStatus.OK, PROJECT_STORE.get_task(task_match.group(1), task_match.group(2)))
+            except LookupError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
+            return
+        report_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/admission-reports/([a-f0-9]{32})(?:/(json|markdown))?", request_path)
+        if report_match:
+            try:
+                saved = PROJECT_STORE.get_report(report_match.group(1), report_match.group(2))
+                if report_match.group(3) == "markdown":
+                    self._send_text(HTTPStatus.OK, saved["markdown"], "text/markdown")
+                elif report_match.group(3) == "json":
+                    self._send_json(HTTPStatus.OK, saved["report"])
+                else:
+                    self._send_json(HTTPStatus.OK, saved["report"])
             except LookupError as error:
                 self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
             return
@@ -184,6 +198,14 @@ class ApplicationHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _send_text(self, status: HTTPStatus, body: str, content_type: str) -> None:
+        data = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", f"{content_type}; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def log_message(self, format: str, *args: object) -> None:
         print(f"{self.address_string()} - {format % args}")
 
@@ -212,6 +234,9 @@ def _run_ac_task(project_id: str, task_id: str, file_version_id: str) -> None:
             PROJECT_STORE.save_stage_result(task_id, stage, result)
         final = run_review(snapshot)
         PROJECT_STORE.save_stage_result(task_id, "summary", final)
+        source_path = [str(chunk.get("source_uri")) for chunk in snapshot.get("chunks", []) if chunk.get("source_uri")]
+        report = build_report(task_id, source_path, final)
+        PROJECT_STORE.save_report(project_id, task_id, report, render_markdown(report))
         PROJECT_STORE.update_task(task_id, stage="completed", status="completed", progress=100)
     except Exception as error:  # noqa: BLE001
         PROJECT_STORE.update_task(task_id, stage="failed", status="manual_review", progress=0, error_code=str(error)[:200])

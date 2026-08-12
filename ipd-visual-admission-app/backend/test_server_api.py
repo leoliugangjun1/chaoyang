@@ -6,6 +6,7 @@ import json
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
@@ -53,6 +54,30 @@ class ServerApiTest(unittest.TestCase):
         status, error = self._upload(project["project_id"], "审核资料.txt", b"not an excel file")
         self.assertEqual(status, 400)
         self.assertIn("固定模板", error["message"])
+
+    def test_completed_task_persists_json_and_markdown_report(self) -> None:
+        _, project = self._request_json("POST", "/api/projects", {"name": "报告验证项目"})
+        project_id = project["project_id"]
+        _, skills = self._request_json("GET", "/api/skills")
+        self._request_json("POST", f"/api/projects/{project_id}/skills", {"skill_id": skills["skills"][0]["skill_id"]})
+        _, uploaded = self._upload(project_id, "审核资料.xlsx", self._workbook_bytes())
+        _, task = self._request_json("POST", f"/api/projects/{project_id}/validation-tasks", {"file_version_id": uploaded["file_version_id"]})
+        for _ in range(30):
+            _, current = self._request_json("GET", f"/api/projects/{project_id}/validation-tasks/{task['task_id']}")
+            if current["status"] != "queued" and current["stage"] in {"completed", "failed"}:
+                break
+            time.sleep(0.05)
+        self.assertEqual(current["stage"], "completed")
+        status, report = self._request_json("GET", f"/api/projects/{project_id}/admission-reports/{task['task_id']}/json")
+        self.assertEqual(status, 200)
+        self.assertIn(report["admission_status"], {"approved", "conditional_approval", "rejected", "manual_review"})
+        connection = HTTPConnection("127.0.0.1", self.httpd.server_port, timeout=10)
+        connection.request("GET", f"/api/projects/{project_id}/admission-reports/{task['task_id']}/markdown")
+        response = connection.getresponse()
+        markdown = response.read().decode("utf-8")
+        connection.close()
+        self.assertEqual(response.status, 200)
+        self.assertIn("IPD 产品视觉准入报告", markdown)
 
     def _request_json(self, method: str, path: str, payload: dict[str, object] | None = None) -> tuple[int, dict[str, object]]:
         body = json.dumps(payload).encode("utf-8") if payload is not None else None

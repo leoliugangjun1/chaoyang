@@ -45,7 +45,7 @@
 
 ## 06. G 阶段与报告导出
 
-- [ ] 修改目标：汇总阶段 JSON，校验 `report-schema.json`，持久化并导出 JSON/Markdown。
+- [x] 修改目标：汇总阶段 JSON，校验 `report-schema.json`，持久化并导出 JSON/Markdown。
 - 允许修改范围：报告与导出服务、API、测试与本文件。
 - 不允许破坏的逻辑：汇总器不得读取原始资料或推翻确认的一票退回；导出不得包含 Prompt、调试日志或密钥。
 - 验收标准：报告可按文件与 Skill 版本复现，Schema 校验通过，导出文件与页面字段一致。

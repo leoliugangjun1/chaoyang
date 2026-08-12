@@ -101,6 +101,14 @@ class ProjectStore:
                     created_at TEXT NOT NULL,
                     PRIMARY KEY(task_id, stage)
                 );
+                CREATE TABLE IF NOT EXISTS admission_reports (
+                    review_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(project_id),
+                    task_id TEXT NOT NULL REFERENCES validation_tasks(task_id),
+                    report_json TEXT NOT NULL,
+                    report_markdown TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
             connection.commit()
@@ -329,3 +337,20 @@ class ProjectStore:
         self.get_task(project_id, task_id)
         self.update_task(task_id, stage="cancelled", status="cancelled", progress=0, error_code="TASK_CANCELLED")
         return self.get_task(project_id, task_id)
+
+    def save_report(self, project_id: str, task_id: str, report: dict[str, Any], markdown: str) -> dict[str, Any]:
+        review_id = str(report["review_id"])
+        with closing(self._connect()) as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO admission_reports (review_id, project_id, task_id, report_json, report_markdown, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (review_id, project_id, task_id, json.dumps(report, ensure_ascii=False), markdown, _utc_now()),
+            )
+            connection.commit()
+        return report
+
+    def get_report(self, project_id: str, review_id: str) -> dict[str, Any]:
+        with closing(self._connect()) as connection:
+            row = connection.execute("SELECT report_json, report_markdown FROM admission_reports WHERE project_id = ? AND review_id = ?", (project_id, review_id)).fetchone()
+        if row is None:
+            raise LookupError("未找到对应准入报告")
+        return {"report": json.loads(row["report_json"]), "markdown": row["report_markdown"]}
