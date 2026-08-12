@@ -1,4 +1,4 @@
-"""Deterministic A-C review stages over the saved Excel Parser snapshot."""
+"""Deterministic A-F review stages over the saved Excel Parser snapshot."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 
-STAGES = ("locating", "hard_fail", "completeness")
+STAGES = ("locating", "hard_fail", "completeness", "claims", "visualization", "communication")
 SKU_PATTERN = re.compile(r"(?:SKU|型号|产品型号|版本)\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9_-]{2,})", re.IGNORECASE)
 MATERIAL_PATTERN = re.compile(r"(锦纶|尼龙|聚酯纤维|氨纶|棉)\s*[^\d]{0,8}(\d{1,3})\s*%")
 
@@ -115,3 +115,69 @@ def run_ac(snapshot: dict[str, Any]) -> dict[str, Any]:
         "hard_fail_checks": hard_fails,
         "completeness": completeness_result,
     }
+
+
+def _claim_items(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for index, chunk in enumerate(_chunks(snapshot), start=1):
+        content = str(chunk.get("render_text", ""))
+        if any(term in content for term in ("卖点", "USP", "功能优势", "核心卖点")):
+            items.append({"claim_id": f"claim-{index:03d}", "claim": content[:200], "source_refs": [chunk.get("source_uri")] if chunk.get("source_uri") else []})
+    return items
+
+
+def claims(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate one minimal task package per claim and rule."""
+    content = _text(snapshot)
+    results: list[dict[str, Any]] = []
+    for item in _claim_items(snapshot):
+        claim_text = item["claim"]
+        has_voc = "VOC" in content or "竞品" in content
+        has_product_evidence = any(term in content for term in ("检测报告", "质检报告", "测试报告", "规格表", "实测", "说明书"))
+        functional = any(term in claim_text for term in ("提臀", "收腹", "支撑", "塑形", "防滑", "透气", "抗菌", "防晒", "保暖"))
+        for rule_id in ("usp_voc", "functional_validation", "evidence_scope", "usp_keyword"):
+            if rule_id == "usp_voc":
+                status, grade, risk = ("pass", "D", "VOC 仅支持市场相关性") if has_voc else ("uncertain", "none", "未找到 VOC 或竞品关联")
+            elif rule_id == "functional_validation":
+                status, grade, risk = (("pass", "A", "") if has_product_evidence and functional else ("uncertain", "none", "功能性卖点缺少本产品验证证据" if functional else "非功能性卖点"))
+            elif rule_id == "evidence_scope":
+                status, grade, risk = (("pass", "A", "") if has_product_evidence else ("risk", "C", "结论可能超出证据范围"))
+            else:
+                status, grade, risk = ("pass", "B", "") if has_product_evidence else ("uncertain", "none", "关键流量词缺少证据与展示路径")
+            results.append({"claim_id": item["claim_id"], "rule_id": rule_id, "status": status, "facts": [claim_text], "inference": "", "evidence_grade": grade, "source_refs": item["source_refs"], "risk": risk, "required_action": "补充本产品可定位证据" if status in ("risk", "uncertain") else "", "owner_role": "质量或研发" if functional else "市场/GTM", "confidence": "high" if item["source_refs"] else "low"})
+    return {"claim_checks": results}
+
+
+def visualization(snapshot: dict[str, Any]) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    for item in _claim_items(snapshot):
+        feasible = any(term in item["claim"] for term in ("宽", "尺寸", "结构", "参数", "颜色"))
+        results.append({"claim_id": item["claim_id"], "status": "feasible" if feasible else "difficult", "proposals": [{"object": "真实产品结构", "shot_or_layout": "结构特写与同条件量测", "supporting_visual": "尺子或规格标注", "supported_conclusion": "仅展示已确认的结构或参数", "limitation": "不得外推为未验证功能"}], "source_refs": item["source_refs"], "risk": "" if feasible else "需要补充可复核展示素材", "required_action": "" if feasible else "补充实物、测量或检测可视化", "owner_role": "视觉负责人", "confidence": "high" if item["source_refs"] else "low"})
+    return {"visualization_checks": results}
+
+
+def communication(snapshot: dict[str, Any]) -> dict[str, Any]:
+    content = _text(snapshot)
+    refs = _refs(snapshot)
+    results: list[dict[str, Any]] = []
+    if any(term in content for term in ("场景", "Slogan", "流量词")):
+        for index, rule_id in enumerate(("scene_dilution", "slogan_perceptibility", "usp_keyword"), start=1):
+            results.append({"target_id": f"communication-{index:03d}", "rule_id": rule_id, "status": "pass" if refs else "uncertain", "finding": "通信内容与已定位资料关联" if refs else "无法定位通信内容来源", "source_refs": refs[:2], "required_action": "" if refs else "补充可定位来源", "owner_role": "市场/GTM" if rule_id != "slogan_perceptibility" else "视觉负责人", "confidence": "high" if refs else "low"})
+    return {"communication_checks": results}
+
+
+def run_review(snapshot: dict[str, Any]) -> dict[str, Any]:
+    base = run_ac(snapshot)
+    claim_result = claims(snapshot)
+    visual_result = visualization(snapshot)
+    communication_result = communication(snapshot)
+    risks = [item for item in claim_result["claim_checks"] if item["status"] in ("risk", "uncertain", "fail")]
+    if base["admission_status"] == "rejected":
+        status = "rejected"
+    elif base["admission_status"] == "manual_review":
+        status = "manual_review"
+    elif risks or any(item["status"] in ("difficult", "uncertain") for item in visual_result["visualization_checks"]):
+        status = "conditional_approval"
+    else:
+        status = "approved"
+    return {**base, **claim_result, **visual_result, **communication_result, "admission_status": status}

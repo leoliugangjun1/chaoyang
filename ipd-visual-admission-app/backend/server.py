@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from .storage import ProjectStore
-from .review_engine import STAGES, run_ac
+from .review_engine import STAGES, claims, communication, completeness, hard_fail, locate, run_review, visualization
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -208,17 +208,9 @@ def _run_ac_task(project_id: str, task_id: str, file_version_id: str) -> None:
             raise ValueError("解析快照为空")
         for index, stage in enumerate(STAGES, start=1):
             PROJECT_STORE.update_task(task_id, stage=stage, status="running", progress=(index - 1) * 33)
-            if stage == "locating":
-                from .review_engine import locate
-                result = locate(snapshot)
-            elif stage == "hard_fail":
-                from .review_engine import hard_fail
-                result = hard_fail(snapshot)
-            else:
-                from .review_engine import completeness
-                result = completeness(snapshot)
+            result = {"locating": locate, "hard_fail": hard_fail, "completeness": completeness, "claims": claims, "visualization": visualization, "communication": communication}[stage](snapshot)
             PROJECT_STORE.save_stage_result(task_id, stage, result)
-        final = run_ac(snapshot)
+        final = run_review(snapshot)
         PROJECT_STORE.save_stage_result(task_id, "summary", final)
         PROJECT_STORE.update_task(task_id, stage="completed", status="completed", progress=100)
     except Exception as error:  # noqa: BLE001
