@@ -6,12 +6,14 @@ import json
 import mimetypes
 import os
 import re
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from .storage import ProjectStore
+from .review_engine import STAGES, run_ac
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +61,13 @@ class ApplicationHandler(BaseHTTPRequestHandler):
             except LookupError as error:
                 self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
             return
+        task_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/validation-tasks/([a-f0-9]{32})", request_path)
+        if task_match:
+            try:
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.get_task(task_match.group(1), task_match.group(2)))
+            except LookupError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
+            return
         if request_path.startswith("/api/"):
             self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
             return
@@ -74,7 +83,9 @@ class ApplicationHandler(BaseHTTPRequestHandler):
             if request_path.startswith("/api/projects/") and request_path.endswith("/validation-tasks"):
                 project_id = request_path.split("/")[3]
                 payload = self._read_json()
-                self._send_json(HTTPStatus.CREATED, PROJECT_STORE.create_validation_task(project_id, payload.get("file_version_id")))
+                task = PROJECT_STORE.create_validation_task(project_id, payload.get("file_version_id"))
+                threading.Thread(target=_run_ac_task, args=(project_id, task["task_id"], task["file_version_id"]), daemon=True).start()
+                self._send_json(HTTPStatus.CREATED, task)
                 return
             upload_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/files", request_path)
             if upload_match:
@@ -92,6 +103,16 @@ class ApplicationHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
         except ValueError as error:
             self._send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+        except LookupError as error:
+            self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/validation-tasks/([a-f0-9]{32})", urlparse(self.path).path)
+        if match is None:
+            self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
+            return
+        try:
+            self._send_json(HTTPStatus.OK, PROJECT_STORE.cancel_task(match.group(1), match.group(2)))
         except LookupError as error:
             self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
 
@@ -177,6 +198,31 @@ def main() -> None:
         print("本地应用已停止")
     finally:
         server.server_close()
+
+
+def _run_ac_task(project_id: str, task_id: str, file_version_id: str) -> None:
+    try:
+        file_version = PROJECT_STORE.get_file_version(project_id, file_version_id)
+        snapshot = file_version.get("snapshot")
+        if not isinstance(snapshot, dict):
+            raise ValueError("解析快照为空")
+        for index, stage in enumerate(STAGES, start=1):
+            PROJECT_STORE.update_task(task_id, stage=stage, status="running", progress=(index - 1) * 33)
+            if stage == "locating":
+                from .review_engine import locate
+                result = locate(snapshot)
+            elif stage == "hard_fail":
+                from .review_engine import hard_fail
+                result = hard_fail(snapshot)
+            else:
+                from .review_engine import completeness
+                result = completeness(snapshot)
+            PROJECT_STORE.save_stage_result(task_id, stage, result)
+        final = run_ac(snapshot)
+        PROJECT_STORE.save_stage_result(task_id, "summary", final)
+        PROJECT_STORE.update_task(task_id, stage="completed", status="completed", progress=100)
+    except Exception as error:  # noqa: BLE001
+        PROJECT_STORE.update_task(task_id, stage="failed", status="manual_review", progress=0, error_code=str(error)[:200])
 
 
 if __name__ == "__main__":

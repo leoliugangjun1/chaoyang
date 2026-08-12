@@ -94,6 +94,13 @@ class ProjectStore:
                     bound_at TEXT NOT NULL,
                     PRIMARY KEY(project_id, skill_type)
                 );
+                CREATE TABLE IF NOT EXISTS stage_results (
+                    task_id TEXT NOT NULL REFERENCES validation_tasks(task_id),
+                    stage TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(task_id, stage)
+                );
                 """
             )
             connection.commit()
@@ -293,3 +300,32 @@ class ProjectStore:
         if not self.get_project_bindings(project_id):
             raise ValueError("启动审核前必须绑定已发布 Skill")
         return self.create_task(project_id, file_version_id, "queued")
+
+    def update_task(self, task_id: str, *, stage: str, status: str, progress: int, error_code: str | None = None) -> None:
+        with closing(self._connect()) as connection:
+            connection.execute(
+                "UPDATE validation_tasks SET stage = ?, status = ?, progress = ?, error_code = ?, updated_at = ? WHERE task_id = ?",
+                (stage, status, progress, error_code, _utc_now(), task_id),
+            )
+            connection.commit()
+
+    def save_stage_result(self, task_id: str, stage: str, result: dict[str, Any]) -> None:
+        with closing(self._connect()) as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO stage_results (task_id, stage, result_json, created_at) VALUES (?, ?, ?, ?)",
+                (task_id, stage, json.dumps(result, ensure_ascii=False), _utc_now()),
+            )
+            connection.commit()
+
+    def get_task(self, project_id: str, task_id: str) -> dict[str, Any]:
+        with closing(self._connect()) as connection:
+            task = connection.execute("SELECT * FROM validation_tasks WHERE project_id = ? AND task_id = ?", (project_id, task_id)).fetchone()
+            if task is None:
+                raise LookupError("未找到对应审核任务")
+            results = connection.execute("SELECT stage, result_json FROM stage_results WHERE task_id = ? ORDER BY created_at", (task_id,)).fetchall()
+        return {**dict(task), "stage_results": {row["stage"]: json.loads(row["result_json"]) for row in results}}
+
+    def cancel_task(self, project_id: str, task_id: str) -> dict[str, Any]:
+        self.get_task(project_id, task_id)
+        self.update_task(task_id, stage="cancelled", status="cancelled", progress=0, error_code="TASK_CANCELLED")
+        return self.get_task(project_id, task_id)
