@@ -75,9 +75,45 @@ class ProjectStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS skills (
+                    skill_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    skill_type TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(skill_type, version)
+                );
+                CREATE TABLE IF NOT EXISTS project_skills (
+                    project_id TEXT NOT NULL REFERENCES projects(project_id),
+                    skill_type TEXT NOT NULL,
+                    skill_id TEXT NOT NULL REFERENCES skills(skill_id),
+                    bound_version TEXT NOT NULL,
+                    bound_content TEXT NOT NULL,
+                    bound_at TEXT NOT NULL,
+                    PRIMARY KEY(project_id, skill_type)
+                );
                 """
             )
             connection.commit()
+        self._seed_published_skill()
+
+    def _seed_published_skill(self) -> None:
+        skill_path = self.data_root.parent / "docs" / "ipd-visual-admission-review" / "SKILL.md"
+        if not skill_path.is_file():
+            skill_path = APP_ROOT / "docs" / "ipd-visual-admission-review" / "SKILL.md"
+        if not skill_path.is_file():
+            return
+        content = skill_path.read_text(encoding="utf-8")
+        with closing(self._connect()) as connection:
+            exists = connection.execute("SELECT 1 FROM skills WHERE skill_type = 'visual_admission' AND version = 'V1.0'").fetchone()
+            if exists is None:
+                connection.execute(
+                    "INSERT INTO skills (skill_id, name, skill_type, version, content, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("ipd-visual-admission-review-v1", "IPD 产品视觉准入审核", "visual_admission", "V1.0", content, "published", _utc_now()),
+                )
+                connection.commit()
 
     def create_project(self, name: str) -> dict[str, Any]:
         cleaned_name = name.strip()
@@ -210,3 +246,50 @@ class ProjectStore:
             )
             connection.commit()
         return {"task_id": task_id, "project_id": project_id, "file_version_id": file_version_id, "stage": stage, "status": "queued", "progress": 0}
+
+    def list_skills(self, include_archived: bool = False) -> list[dict[str, Any]]:
+        query = "SELECT skill_id, name, skill_type, version, status, created_at FROM skills"
+        params: tuple[object, ...] = ()
+        if not include_archived:
+            query += " WHERE status = 'published'"
+        query += " ORDER BY created_at DESC"
+        with closing(self._connect()) as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def bind_skill(self, project_id: str, skill_id: str) -> dict[str, Any]:
+        self.get_project_or_raise(project_id)
+        with closing(self._connect()) as connection:
+            skill = connection.execute("SELECT * FROM skills WHERE skill_id = ? AND status = 'published'", (skill_id,)).fetchone()
+            if skill is None:
+                raise LookupError("未找到可绑定的已发布 Skill")
+            connection.execute(
+                """
+                INSERT INTO project_skills (project_id, skill_type, skill_id, bound_version, bound_content, bound_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id, skill_type) DO UPDATE SET skill_id=excluded.skill_id,
+                    bound_version=excluded.bound_version, bound_content=excluded.bound_content, bound_at=excluded.bound_at
+                """,
+                (project_id, skill["skill_type"], skill["skill_id"], skill["version"], skill["content"], _utc_now()),
+            )
+            connection.commit()
+        return self.get_project_or_raise(project_id)
+
+    def get_project_bindings(self, project_id: str) -> list[dict[str, Any]]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT skill_id, skill_type, bound_version, bound_at FROM project_skills WHERE project_id = ?",
+                (project_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def create_validation_task(self, project_id: str, file_version_id: str | None) -> dict[str, Any]:
+        self.get_project_or_raise(project_id)
+        if not file_version_id:
+            raise ValueError("启动审核前必须选择 Excel 文件")
+        file_version = self.get_file_version(project_id, file_version_id)
+        if file_version["parser_status"] != "parsed":
+            raise ValueError("Excel 尚未解析成功，无法启动审核")
+        if not self.get_project_bindings(project_id):
+            raise ValueError("启动审核前必须绑定已发布 Skill")
+        return self.create_task(project_id, file_version_id, "queued")

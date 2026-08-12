@@ -35,6 +35,9 @@ class ApplicationHandler(BaseHTTPRequestHandler):
         if request_path == "/api/projects":
             self._send_json(HTTPStatus.OK, {"projects": PROJECT_STORE.list_projects()})
             return
+        if request_path == "/api/skills":
+            self._send_json(HTTPStatus.OK, {"skills": PROJECT_STORE.list_skills()})
+            return
         project_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})", request_path)
         if project_match:
             try:
@@ -46,6 +49,13 @@ class ApplicationHandler(BaseHTTPRequestHandler):
         if file_match:
             try:
                 self._send_json(HTTPStatus.OK, PROJECT_STORE.get_file_version(file_match.group(1), file_match.group(2)))
+            except LookupError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
+            return
+        binding_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/skills", request_path)
+        if binding_match:
+            try:
+                self._send_json(HTTPStatus.OK, {"bindings": PROJECT_STORE.get_project_bindings(binding_match.group(1))})
             except LookupError as error:
                 self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
             return
@@ -61,6 +71,11 @@ class ApplicationHandler(BaseHTTPRequestHandler):
                 payload = self._read_json()
                 self._send_json(HTTPStatus.CREATED, PROJECT_STORE.create_project(str(payload.get("name", ""))))
                 return
+            if request_path.startswith("/api/projects/") and request_path.endswith("/validation-tasks"):
+                project_id = request_path.split("/")[3]
+                payload = self._read_json()
+                self._send_json(HTTPStatus.CREATED, PROJECT_STORE.create_validation_task(project_id, payload.get("file_version_id")))
+                return
             upload_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/files", request_path)
             if upload_match:
                 upload = self._read_multipart_file()
@@ -68,6 +83,11 @@ class ApplicationHandler(BaseHTTPRequestHandler):
                     HTTPStatus.CREATED,
                     PROJECT_STORE.save_excel(upload_match.group(1), upload["filename"], upload["content"]),
                 )
+                return
+            skill_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/skills", request_path)
+            if skill_match:
+                payload = self._read_json()
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.bind_skill(skill_match.group(1), str(payload.get("skill_id", ""))))
                 return
             self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
         except ValueError as error:

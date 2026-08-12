@@ -25,5 +25,12 @@ h1 { font-size: 24px; font-weight: 650; margin: 0; }
 .state-block, .empty-state { max-width: 620px; }
 .empty-state h2 { font-size: 20px; margin: 0 0 10px; }
 .empty-state p { color: var(--color-muted); line-height: 1.65; margin: 0 0 20px; }
+.workspace { display: grid; gap: 18px; max-width: 760px; }
+.panel { background: var(--color-surface); border: 1px solid var(--color-line); border-radius: var(--radius); display: grid; gap: 14px; padding: 24px; }
+.panel h2 { font-size: 18px; margin: 0; }
+.form-row { display: flex; gap: 10px; }
+input, select { border: 1px solid var(--color-line); border-radius: var(--radius); background: #fff; color: var(--color-ink); font: inherit; min-height: 40px; padding: 8px 10px; }
+.form-row input { flex: 1; }
+.form-message { color: var(--color-muted); margin: 0; }
 
-@media (max-width: 640px) { .topbar { min-height: 80px; padding: 16px 20px; } .content { padding: 40px 20px; } h1 { font-size: 21px; } }
+@media (max-width: 640px) { .topbar { min-height: 80px; padding: 16px 20px; } .content { padding: 40px 20px; } h1 { font-size: 21px; } .form-row { flex-direction: column; } }
