@@ -5,14 +5,18 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from .storage import ProjectStore
+
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_ROOT = APP_ROOT / "out"
+PROJECT_STORE = ProjectStore()
 
 
 class ApplicationHandler(BaseHTTPRequestHandler):
@@ -26,12 +30,91 @@ class ApplicationHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, {"status": "ok", "service": "ipd-visual-admission"})
             return
         if request_path == "/api/bootstrap":
-            self._send_json(HTTPStatus.OK, {"projects": []})
+            self._send_json(HTTPStatus.OK, {"projects": PROJECT_STORE.list_projects()})
+            return
+        if request_path == "/api/projects":
+            self._send_json(HTTPStatus.OK, {"projects": PROJECT_STORE.list_projects()})
+            return
+        project_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})", request_path)
+        if project_match:
+            try:
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.get_project_or_raise(project_match.group(1)))
+            except LookupError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
+            return
+        file_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/files/([a-f0-9]{32})", request_path)
+        if file_match:
+            try:
+                self._send_json(HTTPStatus.OK, PROJECT_STORE.get_file_version(file_match.group(1), file_match.group(2)))
+            except LookupError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
             return
         if request_path.startswith("/api/"):
             self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
             return
         self._serve_static(request_path)
+
+    def do_POST(self) -> None:  # noqa: N802
+        request_path = urlparse(self.path).path
+        try:
+            if request_path == "/api/projects":
+                payload = self._read_json()
+                self._send_json(HTTPStatus.CREATED, PROJECT_STORE.create_project(str(payload.get("name", ""))))
+                return
+            upload_match = re.fullmatch(r"/api/projects/([a-f0-9]{32})/files", request_path)
+            if upload_match:
+                upload = self._read_multipart_file()
+                self._send_json(
+                    HTTPStatus.CREATED,
+                    PROJECT_STORE.save_excel(upload_match.group(1), upload["filename"], upload["content"]),
+                )
+                return
+            self._send_json(HTTPStatus.NOT_FOUND, {"message": "未找到接口"})
+        except ValueError as error:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+        except LookupError as error:
+            self._send_json(HTTPStatus.NOT_FOUND, {"message": str(error)})
+
+    def _read_json(self) -> dict[str, object]:
+        if "application/json" not in self.headers.get("Content-Type", ""):
+            raise ValueError("请求格式应为 JSON")
+        try:
+            payload = json.loads(self._read_body().decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError("JSON 请求内容无效") from error
+        if not isinstance(payload, dict):
+            raise ValueError("JSON 请求内容无效")
+        return payload
+
+    def _read_multipart_file(self) -> dict[str, object]:
+        content_type = self.headers.get("Content-Type", "")
+        boundary_match = re.search(r"boundary=([^;]+)", content_type)
+        if "multipart/form-data" not in content_type or boundary_match is None:
+            raise ValueError("请求格式应为 multipart/form-data")
+        boundary = boundary_match.group(1).strip('"').encode("utf-8")
+        uploads: list[dict[str, object]] = []
+        for part in self._read_body().split(b"--" + boundary):
+            if b"Content-Disposition:" not in part or b"\r\n\r\n" not in part:
+                continue
+            headers, content = part.split(b"\r\n\r\n", 1)
+            filename_match = re.search(r'filename="([^"]*)"', headers.decode("utf-8", errors="replace"))
+            if filename_match is None or not filename_match.group(1):
+                continue
+            uploads.append({"filename": filename_match.group(1), "content": content[:-2] if content.endswith(b"\r\n") else content})
+        if len(uploads) != 1:
+            raise ValueError("每次只能上传一个固定模板 Excel 文件")
+        return uploads[0]
+
+    def _read_body(self) -> bytes:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as error:
+            raise ValueError("请求长度无效") from error
+        if length <= 0:
+            raise ValueError("请求内容为空")
+        if length > 25 * 1024 * 1024:
+            raise ValueError("单次上传不能超过 25 MB")
+        return self.rfile.read(length)
 
     def _serve_static(self, request_path: str) -> None:
         requested = "index.html" if request_path in {"", "/"} else unquote(request_path.lstrip("/"))
