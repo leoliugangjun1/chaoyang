@@ -1,126 +1,143 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { ChangeEvent, DragEvent, useRef, useState } from "react";
 
-type Project = { project_id: string; name: string; file_count: number };
-type Skill = { skill_id: string; name: string; version: string };
-type Task = { task_id: string; stage: string; status: string; progress: number; error_code?: string | null; stage_results?: Record<string, unknown> };
-type Report = { review_id: string; admission_status: "approved" | "conditional_approval" | "rejected" | "manual_review"; source_path: string[]; hard_fail_checks: { rule_id: string; hard_fail: boolean; finding: string; source_refs: string[] }[]; completeness: { marketing_score: number; manual_score: number; raw_score: number; audited_completeness_percent: number; missing_fields: string[] }; findings: { category: string; status: string; finding: string; source_refs: string[]; required_action: string; owner_role: string }[] };
-type BootstrapResponse = { projects: Project[] };
-type LoadState = "loading" | "ready" | "error";
+// Prototype question: can a designer judge an IPD admission result from a Markdown file in one screen?
+type AdmissionResult = "通过" | "有条件通过" | "不通过";
+type Severity = "blocker" | "warning";
+type Priority = "high" | "medium" | "low";
+type NoteType = "info" | "warning" | "danger";
+type ReturnReason = { issue_id: string; title: string; reason: string; severity: Severity; source_ref?: string; required_action?: string };
+type Advice = { advice_id: string; title: string; content: string; priority?: Priority; related_issue_id?: string };
+type Note = { note_id: string; type: NoteType; content: string };
+type Source = { source_id: string; source_name: string; source_type?: string; weight?: number; status?: string };
+type DashboardData = { schema_version?: string; product_id?: string; reviewed_at?: string; report_title?: string; admission_result?: string; decision_summary?: string; return_reasons: ReturnReason[]; completeness_score?: number; visual_advice: Advice[]; notes: Note[]; source_summary: Source[]; unknown_fields: Record<string, unknown> };
+
+const example = `---
+schema_version: ipd-admission-v1
+product_id: CYA001
+reviewed_at: 2026-08-19
+---
+
+# CYA001 | report_title
+抓绒内衬保暖被视觉准入审核报告
+
+## CYA002 | admission_result
+有条件通过
+
+## CYA003 | decision_summary
+核心产品信息基本完整，可进入视觉制作；但具体保暖温度缺少可追溯证据，视觉表达需避免量化承诺。
+
+## CYA004 | return_reasons
+- issue_id: IPD-003
+  title: 保暖温度缺少证据
+  reason: 当前资料出现具体温度承诺，但未提供可追溯测试依据，不建议直接用于视觉宣传。
+  severity: blocker
+  source_ref: 产品营销资料对接区 / 卖点 04
+  required_action: 补充测试报告，或删除具体温度数字。
+
+## CYA005 | completeness_score
+92
+
+## CYA006 | visual_advice
+- advice_id: VA-001
+  title: 保暖属性
+  content: 通过绒里特写、冬季穿搭和材质细节证明保暖感，避免直接使用未经验证的温度数字。
+  priority: high
+  related_issue_id: IPD-003
+- advice_id: VA-002
+  title: 塑形表达
+  content: 可展示高腰结构和自然穿着轮廓，不使用医疗化或保证效果式表达。
+  priority: medium
+
+## CYA007 | notes
+- note_id: NOTE-001
+  type: warning
+  content: 所有对外视觉卖点必须能回溯至已确认产品事实。
+
+## SYS003 | source_summary
+- source_id: SRC-001
+  source_name: 产品营销资料对接区
+  source_type: primary
+  weight: 80
+  status: used
+- source_id: SRC-002
+  source_name: 产品说明书
+  source_type: secondary
+  weight: 15
+  status: used`;
+
+const fieldMap: Record<string, keyof DashboardData> = { CYA001: "report_title", CYA002: "admission_result", CYA003: "decision_summary", CYA004: "return_reasons", CYA005: "completeness_score", CYA006: "visual_advice", CYA007: "notes", SYS003: "source_summary" };
+const arrays = new Set(["return_reasons", "visual_advice", "notes", "source_summary"]);
+
+function scalar(value: string) { return value.trim().replace(/^['"]|['"]$/g, ""); }
+function yamlList(value: string) {
+  const items: Record<string, string>[] = []; let current: Record<string, string> | null = null;
+  for (const raw of value.split("\n")) { const line = raw.trim(); if (!line) continue; const first = line.match(/^-\s+([\w_]+):\s*(.*)$/); const pair = line.match(/^([\w_]+):\s*(.*)$/); if (first) { current = { [first[1]]: scalar(first[2]) }; items.push(current); } else if (pair && current) current[pair[1]] = scalar(pair[2]); }
+  return items;
+}
+function numberedList(key: string, value: string) {
+  const entries = value.split(/^\s*\d+\.\s+/m).map((entry) => entry.trim()).filter(Boolean);
+  if (key === "return_reasons") return entries.map((entry, index) => { const lines = entry.split("\n").map((line) => line.trim()).filter(Boolean); const head = lines.shift() || ""; const match = head.match(/^\*\*(.+?)(?:\||｜)(.+?)\*\*[（(](blocker|warning)[）)]/); const action = lines.find((line) => line.startsWith("处理：")); return { issue_id: match?.[1]?.trim() || `ISSUE-${index + 1}`, title: match?.[2]?.trim() || head.replace(/\*\*/g, ""), severity: match?.[3] || "warning", reason: lines.filter((line) => !line.startsWith("处理：")).join(" "), required_action: action?.replace(/^处理：/, "") }; });
+  if (key === "visual_advice") return entries.map((content, index) => ({ advice_id: `VA-${String(index + 1).padStart(3, "0")}`, title: `视觉建议 ${index + 1}`, content, priority: "medium" }));
+  if (key === "notes") return entries.map((content, index) => ({ note_id: `NOTE-${String(index + 1).padStart(3, "0")}`, type: "warning", content }));
+  if (key === "source_summary") return entries.map((content, index) => { const match = content.match(/^(.*?)（(.*?)，(\d+)%[，,](.*?)）$/); return { source_id: `SRC-${String(index + 1).padStart(3, "0")}`, source_name: match?.[1]?.trim() || content, source_type: match?.[2]?.trim(), weight: match?.[3] ? Number(match[3]) : undefined, status: match?.[4]?.trim() }; });
+  return [];
+}
+function parseMarkdown(raw: string): DashboardData {
+  const data: DashboardData = { return_reasons: [], visual_advice: [], notes: [], source_summary: [], unknown_fields: {} };
+  const front = raw.match(/^---\s*\n([\s\S]*?)\n---\s*/);
+  if (front) for (const line of front[1].split("\n")) { const match = line.match(/^([\w_]+):\s*(.*)$/); if (!match) continue; const key = match[1] as keyof DashboardData; if (["schema_version", "product_id", "reviewed_at"].includes(key)) (data as Record<string, unknown>)[key] = scalar(match[2]); else data.unknown_fields[key] = scalar(match[2]); }
+  const body = raw.slice(front ? front[0].length : 0);
+  const headings = [...body.matchAll(/^#{1,6}\s+([A-Z]+\d+)\s*(?:\||｜)\s*[^\n]+$/gm)];
+  for (let index = 0; index < headings.length; index += 1) { const match = headings[index]; const id = match[1]; const key = fieldMap[id]; const start = (match.index ?? 0) + match[0].length; const end = index + 1 < headings.length ? (headings[index + 1].index ?? body.length) : body.length; const content = body.slice(start, end).trim(); if (!key) { data.unknown_fields[id] = content; continue; } if (arrays.has(key)) (data as Record<string, unknown>)[key] = content.startsWith("-") ? yamlList(content) : numberedList(key, content); else if (key === "completeness_score") { const score = Number(content.match(/-?\d+(?:\.\d+)?/)?.[0]); if (Number.isFinite(score)) data.completeness_score = score; } else (data as Record<string, unknown>)[key] = scalar(content); }
+  return data;
+}
+function parseJson(raw: string): DashboardData {
+  let source: unknown;
+  try { source = JSON.parse(raw); } catch { throw new Error("JSON 格式无效，请检查逗号、引号和括号。"); }
+  if (!source || typeof source !== "object" || Array.isArray(source)) throw new Error("JSON 根节点必须是对象。");
+  const record = source as Record<string, unknown>;
+  const data: DashboardData = {
+    schema_version: typeof record.schema_version === "string" ? record.schema_version : undefined,
+    product_id: typeof record.product_id === "string" ? record.product_id : undefined,
+    reviewed_at: typeof record.reviewed_at === "string" ? record.reviewed_at : undefined,
+    report_title: typeof record.report_title === "string" ? record.report_title : undefined,
+    admission_result: typeof record.admission_result === "string" ? record.admission_result : undefined,
+    decision_summary: typeof record.decision_summary === "string" ? record.decision_summary : undefined,
+    return_reasons: Array.isArray(record.return_reasons) ? record.return_reasons as ReturnReason[] : [],
+    completeness_score: typeof record.completeness_score === "number" ? record.completeness_score : undefined,
+    visual_advice: Array.isArray(record.visual_advice) ? record.visual_advice as Advice[] : [],
+    notes: Array.isArray(record.notes) ? record.notes as Note[] : [],
+    source_summary: Array.isArray(record.source_summary) ? record.source_summary as Source[] : [],
+    unknown_fields: {},
+  };
+  const known = new Set(["schema_version", "product_id", "reviewed_at", "report_title", "admission_result", "decision_summary", "return_reasons", "completeness_score", "visual_advice", "notes", "source_summary"]);
+  for (const [key, value] of Object.entries(record)) if (!known.has(key)) data.unknown_fields[key] = value;
+  return data;
+}
+function validate(data: DashboardData) {
+  const errors: string[] = []; const warnings: string[] = [];
+  if (data.schema_version !== "ipd-admission-v1") errors.push("协议不兼容：仅支持 ipd-admission-v1。");
+  for (const [id, key] of [["CYA001", "report_title"], ["CYA002", "admission_result"], ["CYA003", "decision_summary"], ["SYS003", "source_summary"]] as const) if (!data[key] || (Array.isArray(data[key]) && !data[key].length)) { console.warn(`Missing field ${id}`); warnings.push(`${id} 数据缺失`); }
+  if (data.admission_result && !["通过", "有条件通过", "不通过"].includes(data.admission_result)) errors.push("准入状态异常：CYA002 不是支持的枚举值。");
+  if (data.admission_result !== "通过" && data.admission_result && !data.return_reasons.length) errors.push("数据异常：当前结论需要问题明细，但 CYA004 为空。");
+  if (data.completeness_score === undefined) { console.warn("Missing field CYA005"); warnings.push("CYA005 数据缺失"); }
+  else if (data.completeness_score < 0 || data.completeness_score > 100) errors.push("完整度评分异常：CYA005 必须在 0 到 100 之间。");
+  return { errors, warnings };
+}
+
+function Badge({ result }: { result?: string }) { const meta = result === "通过" ? ["success", "✓"] : result === "有条件通过" ? ["warning", "!"] : result === "不通过" ? ["danger", "×"] : ["muted", "?"]; return <span className={`admission-badge ${meta[0]}`}><b>{meta[1]}</b>{result || "数据缺失"}</span>; }
+function Score({ score }: { score?: number }) { const label = score === undefined ? "未提供完整度评分" : score >= 90 ? "资料完整" : score >= 70 ? "基本完整" : score >= 50 ? "明显缺失" : "不具备制作条件"; return <article className="score-card"><p className="eyebrow">资料完整度</p><div className="score"><strong>{score ?? "--"}</strong><span>/100</span></div><p className="score-label">{label}</p><div className="progress"><i style={{ width: `${score ?? 0}%` }} /></div></article>; }
 
 export default function HomePage() {
-  const [state, setState] = useState<LoadState>("loading");
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [projectName, setProjectName] = useState("");
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [selectedSkill, setSelectedSkill] = useState("");
-  const [actionState, setActionState] = useState<LoadState | "idle">("idle");
-  const [message, setMessage] = useState("");
-  const [view, setView] = useState<"input" | "progress" | "report">("input");
-  const [task, setTask] = useState<Task | null>(null);
-  const [report, setReport] = useState<Report | null>(null);
-  const [findingFilter, setFindingFilter] = useState("all");
-  const [history, setHistory] = useState<{ review_id: string; admission_status: string; created_at: string }[]>([]);
-
-  const load = async () => {
-    setState("loading");
-    try {
-      const response = await fetch("/api/bootstrap");
-      if (!response.ok) throw new Error("bootstrap failed");
-      const payload = (await response.json()) as BootstrapResponse;
-      setProjects(payload.projects);
-      const skillResponse = await fetch("/api/skills");
-      if (!skillResponse.ok) throw new Error("skills failed");
-      const skillPayload = (await skillResponse.json()) as { skills: Skill[] };
-      setSkills(skillPayload.skills);
-      setSelectedSkill(skillPayload.skills[0]?.skill_id ?? "");
-      if (selectedProject) {
-        const historyResponse = await fetch(`/api/projects/${selectedProject.project_id}/admission-reports`);
-        if (historyResponse.ok) setHistory(((await historyResponse.json()) as { reports: typeof history }).reports);
-      }
-      setState("ready");
-    } catch {
-      setState("error");
-    }
-  };
-
-  useEffect(() => { void load(); }, []);
-
-  const createProject = async () => {
-    setActionState("loading"); setMessage("");
-    try {
-      const response = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: projectName }) });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.message || "项目创建失败");
-      setSelectedProject(payload); setProjectName(""); setActionState("ready"); await load();
-    } catch (error) { setMessage(error instanceof Error ? error.message : "项目创建失败"); setActionState("error"); }
-  };
-
-  const uploadAndStart = async () => {
-    if (!selectedProject || !selectedFile || !selectedSkill) { setMessage("请先选择项目、Excel 文件和 Skill 版本"); return; }
-    setActionState("loading"); setMessage("");
-    try {
-      const form = new FormData(); form.append("file", selectedFile);
-      const uploadResponse = await fetch(`/api/projects/${selectedProject.project_id}/files`, { method: "POST", body: form });
-      const upload = await uploadResponse.json(); if (!uploadResponse.ok) throw new Error(upload.message || "文件上传失败");
-      const bindResponse = await fetch(`/api/projects/${selectedProject.project_id}/skills`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ skill_id: selectedSkill }) });
-      const binding = await bindResponse.json(); if (!bindResponse.ok) throw new Error(binding.message || "Skill 绑定失败");
-      const taskResponse = await fetch(`/api/projects/${selectedProject.project_id}/validation-tasks`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file_version_id: upload.file_version_id }) });
-      const task = await taskResponse.json(); if (!taskResponse.ok) throw new Error(task.message || "审核任务创建失败");
-      setMessage(`任务已创建：${task.task_id}`); setActionState("ready"); await load();
-      setTask(task); setView("progress"); void pollTask(selectedProject.project_id, task.task_id);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "审核启动失败"); setActionState("error"); }
-  };
-
-  const pollTask = async (projectId: string, taskId: string) => {
-    try {
-      const response = await fetch(`/api/projects/${projectId}/validation-tasks/${taskId}`);
-      const current = (await response.json()) as Task;
-      if (!response.ok) throw new Error((current as unknown as { message?: string }).message || "任务状态读取失败");
-      setTask(current);
-      if (current.status === "completed") {
-        const reportResponse = await fetch(`/api/projects/${projectId}/admission-reports/${taskId}/json`);
-        const reportPayload = await reportResponse.json();
-        if (!reportResponse.ok) throw new Error(reportPayload.message || "报告读取失败");
-        setReport(reportPayload as Report); setView("report"); return;
-      }
-      if (current.status === "manual_review" || current.status === "cancelled") return;
-      window.setTimeout(() => void pollTask(projectId, taskId), 350);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "任务状态读取失败"); setActionState("error"); }
-  };
-
-  const cancelTask = async () => {
-    if (!selectedProject || !task) return;
-    setActionState("loading");
-    const response = await fetch(`/api/projects/${selectedProject.project_id}/validation-tasks/${task.task_id}`, { method: "DELETE" });
-    const payload = (await response.json()) as Task;
-    if (response.ok) { setTask(payload); setActionState("ready"); setMessage("审核任务已取消，临时结果不会作为正式报告展示。"); }
-    else { setActionState("error"); setMessage((payload as unknown as { message?: string }).message || "取消失败"); }
-  };
-
-  const statusLabel: Record<Report["admission_status"], string> = { approved: "通过", conditional_approval: "有条件通过", rejected: "不通过", manual_review: "待人工确认" };
-  const filteredFindings = report?.findings.filter((finding) => findingFilter === "all" || finding.status === findingFilter) ?? [];
-
-  return (
-    <main className="shell">
-      <header className="topbar">
-        <div><p className="eyebrow">IPD / 产品资料审核</p><h1>视觉准入审核</h1></div>
-        <div className="topbar-actions"><span className="local-tag">本地运行</span>{task && <nav className="view-nav" aria-label="审核阶段"><button className={view === "input" ? "active" : ""} onClick={() => setView("input")}>输入</button><button className={view === "progress" ? "active" : ""} onClick={() => setView("progress")}>进度</button><button className={view === "report" ? "active" : ""} onClick={() => setView("report")} disabled={!report}>报告</button></nav>}</div>
-      </header>
-      <section className="content" aria-live="polite">
-        {state === "loading" && <p className="state-message">正在加载审核项目...</p>}
-        {state === "error" && <div className="state-block"><p>无法加载项目数据。</p><button type="button" onClick={() => void load()}>重试</button></div>}
-        {state === "ready" && view === "input" && <div className="workspace">
-          <section className="panel"><h2>创建审核项目</h2><div className="form-row"><input aria-label="项目名称" placeholder="项目名称" value={projectName} onChange={(event) => setProjectName(event.target.value)} /><button type="button" onClick={() => void createProject()} disabled={actionState === "loading" || !projectName.trim()}>创建项目</button></div></section>
-          <section className="panel"><h2>审核任务输入</h2><select aria-label="选择项目" value={selectedProject?.project_id ?? ""} onChange={(event) => setSelectedProject(projects.find((project) => project.project_id === event.target.value) ?? null)}><option value="">选择项目</option>{projects.map((project) => <option key={project.project_id} value={project.project_id}>{project.name}</option>)}</select><input aria-label="上传 Excel" type="file" accept=".xlsx" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} /><select aria-label="Skill 版本" value={selectedSkill} onChange={(event) => setSelectedSkill(event.target.value)}><option value="">选择 Skill 版本</option>{skills.map((skill) => <option key={skill.skill_id} value={skill.skill_id}>{skill.name} / {skill.version}</option>)}</select><button type="button" onClick={() => void uploadAndStart()} disabled={actionState === "loading" || !selectedProject || !selectedFile || !selectedSkill}>启动审核</button>{history.length > 0 && <div className="history-list"><h3>历史报告</h3>{history.map((item) => <div key={item.review_id}><span>{item.review_id}</span><strong>{item.admission_status}</strong></div>)}</div>}{message && <p className="form-message">{message}</p>}</section>
-          {projects.length === 0 && <div className="empty-state"><h2>尚无审核项目</h2><p>创建项目并上传固定模板 Excel 后，可开始资料准入审核。</p></div>}
-        </div>}
-        {state === "ready" && view === "progress" && task && <section className="workspace"><div className="panel progress-panel"><div className="section-heading"><div><p className="eyebrow">任务 {task.task_id}</p><h2>{task.status === "manual_review" ? "待人工确认" : task.status === "cancelled" ? "已取消" : "审核进行中"}</h2></div><button type="button" onClick={() => void cancelTask()} disabled={actionState === "loading" || ["completed", "cancelled", "manual_review"].includes(task.status)}>取消任务</button></div><div className="progress-track"><span style={{ width: `${task.progress}%` }} /></div><div className="progress-meta"><strong>{task.progress}%</strong><span>当前阶段：{task.stage}</span></div>{task.error_code && <p className="form-message">错误：{task.error_code}</p>}{task.status === "manual_review" && <p className="form-message">系统无法完成可验证的审核，请人工复核来源、产品范围或输出格式。</p>}</div></section>}
-        {state === "ready" && view === "report" && report && <section className="report-view"><div className={`report-status status-${report.admission_status}`}><div><p className="eyebrow">报告 {report.review_id}</p><h2>{statusLabel[report.admission_status]}</h2></div><span>来源 {report.source_path.length} 条</span></div><div className="metric-grid"><div><span>营销资料</span><strong>{report.completeness.marketing_score.toFixed(1)} / 80</strong></div><div><span>产品说明书</span><strong>{report.completeness.manual_score.toFixed(1)} / 15</strong></div><div><span>审计完整度</span><strong>{report.completeness.audited_completeness_percent.toFixed(1)}%</strong></div></div><section className="report-section"><h3>一票退回检查</h3>{report.hard_fail_checks.map((check) => <div className="hard-fail-row" key={check.rule_id}><strong>{check.rule_id}</strong><span>{check.hard_fail ? "命中" : "未命中"}</span><p>{check.finding}</p><small>{check.source_refs.length ? check.source_refs.join("；") : "无法进一步定位"}</small></div>)}</section><section className="report-section"><div className="section-heading"><h3>问题明细</h3><select aria-label="筛选问题状态" value={findingFilter} onChange={(event) => setFindingFilter(event.target.value)}><option value="all">全部状态</option><option value="pass">通过</option><option value="risk">风险</option><option value="fail">失败</option><option value="uncertain">待复核</option><option value="difficult">展示困难</option></select></div>{filteredFindings.length === 0 ? <p className="form-message">当前筛选条件下暂无问题。</p> : <div className="findings-list">{filteredFindings.map((finding, index) => <article className="finding-row" key={`${finding.category}-${index}`}><div className="finding-title"><strong>{finding.category}</strong><span className={`finding-status finding-${finding.status}`}>{finding.status}</span></div><p>{finding.finding}</p><small>必需动作：{finding.required_action || "无"}；责任角色：{finding.owner_role || "未指定"}</small><small>来源：{finding.source_refs.length ? finding.source_refs.join("；") : "无法进一步定位"}</small></article>)}</div>}</section></section>}
-      </section>
-    </main>
-  );
+  const [data, setData] = useState<DashboardData | null>(null); const [errors, setErrors] = useState<string[]>([]); const [warnings, setWarnings] = useState<string[]>([]); const [dragging, setDragging] = useState(false); const [expanded, setExpanded] = useState(false); const input = useRef<HTMLInputElement>(null);
+  const load = (raw: string, format: "markdown" | "json" = "markdown") => { try { const parsed = format === "json" ? parseJson(raw) : parseMarkdown(raw); const outcome = validate(parsed); setData(parsed); setErrors(outcome.errors); setWarnings(outcome.warnings); } catch (reason) { setData(null); setWarnings([]); setErrors([reason instanceof Error ? reason.message : "无法解析输入文件。"]); } };
+  const accept = async (file?: File) => { if (!file) return; const name = file.name.toLowerCase(); if (!name.endsWith(".md") && !name.endsWith(".json")) { setErrors(["请选择 .md 或 .json 格式的结论文件。"]); return; } load(await file.text(), name.endsWith(".json") ? "json" : "markdown"); };
+  const onDrop = (event: DragEvent<HTMLDivElement>) => { event.preventDefault(); setDragging(false); void accept(event.dataTransfer.files[0]); };
+  if (!data) return <main className="upload-page"><header className="minimal-brand"><span>IPD</span><p>视觉准入看板</p></header><section className="upload-intro"><p className="eyebrow">IPD VISUAL ADMISSION</p><h1>导入 IPD 视觉准入结论</h1><p>上传符合 <code>ipd-admission-v1</code> 协议的 Markdown 或 JSON 文件，生成结构化审核看板。</p></section><section className={`dropzone ${dragging ? "is-dragging" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}><div className="upload-icon">↑</div><h2>拖入 Markdown 或 JSON 文件</h2><p>或从本地选择一份审核结论</p><button onClick={() => input.current?.click()}>选择 .md / .json 文件</button><input ref={input} type="file" accept=".md,.json,text/markdown,application/json" onChange={(e: ChangeEvent<HTMLInputElement>) => void accept(e.target.files?.[0])} /><button className="example-link" onClick={() => load(example)}>加载示例结论</button></section>{errors.length > 0 && <p className="upload-error">{errors[0]}</p>}</main>;
+  if (errors.some((error) => error.startsWith("协议不兼容"))) return <main className="error-page"><p className="eyebrow">INPUT CONTRACT ERROR</p><h1>协议不兼容</h1><p>{errors[0]}</p><button onClick={() => { setData(null); setErrors([]); }}>重新导入</button></main>;
+  const issuesNeeded = data.admission_result !== "通过";
+  const advice = expanded ? data.visual_advice : data.visual_advice.slice(0, 3);
+  return <main className="page"><header className="topbar"><div className="minimal-brand"><span>IPD</span><p>视觉准入看板</p></div><button className="replace" onClick={() => { setData(null); setErrors([]); setWarnings([]); }}>更换文件</button></header><div className="container"><section className="hero"><p className="eyebrow">IPD VISUAL ADMISSION · PRODUCT FACT REVIEW</p><h1>{data.report_title || "数据缺失"}</h1><div className="meta"><span>产品 ID · {data.product_id || "--"}</span><span>审核时间 · {data.reviewed_at || "--"}</span></div><Badge result={data.admission_result} /><p className="hero-summary">{data.decision_summary || "数据缺失"}</p></section>{warnings.length > 0 && <aside className="data-warning">{warnings.join(" · ")}</aside>}<section className="section"><div className="section-head"><p className="eyebrow">结论摘要</p><h2>可用于后续制作的判断依据</h2></div><div className="summary-grid"><article className="summary-card"><p className="eyebrow">结论概述</p><p>{data.decision_summary || "数据缺失"}</p></article><Score score={data.completeness_score} /><article className="advice-card"><p className="eyebrow">视觉建议</p>{advice.length ? <div className="advice-list">{advice.map((item) => <div className="advice" key={item.advice_id}><span className={`priority ${item.priority || "low"}`}>{item.priority || "low"}</span><div><h3>{item.title}</h3><p>{item.content}</p></div></div>)}</div> : null}{data.visual_advice.length > 3 && <button className="show-more" onClick={() => setExpanded(!expanded)}>{expanded ? "收起建议" : `查看全部 ${data.visual_advice.length} 条建议`}</button>}</article></div></section>{issuesNeeded && <section className="section issues-section"><div className="section-head"><p className="eyebrow">问题 / 退回项</p><h2>下一步需要处理的内容</h2></div>{data.return_reasons.length ? <div className="issue-list">{data.return_reasons.map((item) => <article className={`issue ${item.severity}`} key={item.issue_id}><div className="issue-top"><code>{item.issue_id}</code><span>{item.severity === "blocker" ? "阻断项" : "需关注"}</span></div><h3>{item.title}</h3><p>{item.reason}</p>{item.required_action && <div className="action"><small>建议动作</small><p>{item.required_action}</p></div>}{item.source_ref && <details><summary>查看来源</summary><p>{item.source_ref}</p></details>}</article>)}</div> : <aside className="data-warning">数据异常：当前结论需要问题明细，但 CYA004 为空。</aside>}</section>}{data.notes.length > 0 && <section className="section"><div className="section-head"><p className="eyebrow">注意事项</p><h2>制作边界与提示</h2></div><div className="notice-list">{data.notes.map((note) => <aside className={`notice ${note.type}`} key={note.note_id}><b>{note.type === "danger" ? "重要提示" : note.type === "warning" ? "注意" : "说明"}</b><span>{note.content}</span></aside>)}</div></section>}<section className="section sources"><div className="section-head"><p className="eyebrow">数据来源 / 证据追溯</p><h2>审核依据</h2></div>{data.source_summary.length ? <div className="source-list">{data.source_summary.map((source) => <article key={source.source_id}><div><h3>{source.source_name}</h3><p>{source.source_type || "未标注类型"} · {source.status || "未标注状态"}</p></div>{source.weight !== undefined && <strong>{source.weight}<small>% 权重</small></strong>}</article>)}</div> : <aside className="data-warning">SYS003 数据缺失</aside>}</section></div></main>;
 }
