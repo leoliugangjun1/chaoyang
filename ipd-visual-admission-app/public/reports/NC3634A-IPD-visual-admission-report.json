@@ -1,0 +1,147 @@
+{
+  "schema_version": "ipd-admission-v1",
+  "product_id": "NC3634A",
+  "reviewed_at": "2026-08-19T11:41:00+08:00",
+  "report_title": "NC3634A 女士保暖紧身高腰打底裤｜产品视觉准入审核报告",
+  "admission_result": "不通过",
+  "decision_summary": "资料完整度较高，但核心功能主张缺少本品可追溯验证，且尺码范围存在冲突；补齐证据并统一版本前不得进入视觉制作。",
+  "return_reasons": [
+    {
+      "issue_id": "CORE-EVIDENCE-001",
+      "title": "核心功能卖点缺少可追溯验证证据",
+      "reason": "收腹、防卷、不掉档、保暖和提臀均只有产品描述或营销话术，未定位到本品检测、测试或专业报告。",
+      "severity": "blocker",
+      "source_ref": "（2）产品营销对接资料包!D27:H31；（3）产品说明书（关键信息上BOM）!C15:K19、D52:J56",
+      "required_action": "逐条提供可定位的本品测试/质检/专业报告，并标明适用型号、测试条件、结论范围与对应卖点。"
+    },
+    {
+      "issue_id": "CONFLICT-SIZE-001",
+      "title": "同一产品资料的尺码范围冲突",
+      "reason": "基础信息写明下单尺码为 S-2XL，卖点说明书写明为 S-XL，当前无法确定对外适用版本。",
+      "severity": "blocker",
+      "source_ref": "（3）产品说明书（关键信息上BOM）!K4；（3）产品说明书（关键信息上BOM）!K43",
+      "required_action": "由产品负责人确认最终 SKU/版本与完整尺码矩阵，并同步更新说明书、GTM 与视觉脚本。"
+    },
+    {
+      "issue_id": "RTB-ATTACHMENT-001",
+      "title": "RTB 报告未形成可追溯附件",
+      "reason": "资料列出“机洗实验报告”，但测试附件/链接为空；洗后外观标准不能替代实际测试结果。",
+      "severity": "warning",
+      "source_ref": "（2）产品营销对接资料包!D37:E44",
+      "required_action": "补充机洗/抗起球等报告原件或链接，并标注样品型号、测试方法和结果。"
+    }
+  ],
+  "completeness_score": 88,
+  "visual_advice": [
+    {
+      "advice_id": "VIS-001",
+      "title": "可先准备结构与量测型素材",
+      "content": "在证据补齐后，优先用腹部双层实物特写、6.5cm 腰头量测、面料成分/克重信息、尺码表及不同肤色真人上腿图，呈现已知可见事实。",
+      "priority": "high",
+      "related_issue_id": "CORE-EVIDENCE-001"
+    },
+    {
+      "advice_id": "VIS-002",
+      "title": "暂停效果型对比与绝对承诺",
+      "content": "暂不制作“穿前穿后提臀”“收腹效果”“久坐不卷边/不掉档”及“更薄更暖”的结果对比；这些结论需由本品证据限定后才能展示。",
+      "priority": "high",
+      "related_issue_id": "CORE-EVIDENCE-001"
+    }
+  ],
+  "notes": [
+    {
+      "note_id": "NOTE-001",
+      "type": "warning",
+      "content": "VOC、竞对评论与横向报告可证明用户痛点和市场相关性，不能作为本产品功能效果证据。"
+    },
+    {
+      "note_id": "NOTE-002",
+      "type": "info",
+      "content": "产品型号在说明书中为 NC3634A，GTM 的产品 SPU 为 NC3634；建议在所有资料中明确两者的父子款/版本关系。"
+    }
+  ],
+  "source_summary": [
+    {
+      "source_id": "marketing-package",
+      "source_name": "产品营销对接资料包",
+      "source_type": "primary",
+      "weight": 80,
+      "status": "used"
+    },
+    {
+      "source_id": "product-manual",
+      "source_name": "产品说明书（关键信息上BOM）",
+      "source_type": "secondary",
+      "weight": 15,
+      "status": "used"
+    },
+    {
+      "source_id": "gtm-market-research",
+      "source_name": "完整GTM与营销打法调研",
+      "source_type": "other",
+      "weight": 5,
+      "status": "used"
+    }
+  ],
+  "audit_detail": {
+    "review_id": "IPD-NC3634A-20260819",
+    "admission_status": "rejected",
+    "source_path": [
+      "（2）产品营销对接资料包",
+      "（3）产品说明书（关键信息上BOM）",
+      "（8）完整GTM（销售）",
+      "(2)营销打法调研（市场洞察）"
+    ],
+    "hard_fail_checks": [
+      {
+        "rule_id": "model_version",
+        "hard_fail": false,
+        "manual_review": false,
+        "finding": "说明书可定位型号 NC3634A；GTM 使用 NC3634 作为 SPU，需补充两者关系说明。",
+        "items": [
+          {"item_id": "product-id", "status": "pass", "source_refs": ["（3）产品说明书（关键信息上BOM）!C2", "（8）完整GTM（销售）!A5"], "reason": "可定位产品识别，但命名粒度不同。"}
+        ],
+        "confidence": "medium"
+      },
+      {
+        "rule_id": "core_claim_evidence",
+        "hard_fail": true,
+        "manual_review": false,
+        "finding": "五项核心功能卖点未定位到本品检测、质检或专业报告；营销与说明书中的描述不足以独立证明功能效果。",
+        "items": [
+          {"item_id": "claim-001", "status": "fail", "source_refs": ["（2）产品营销对接资料包!D27:H27", "（3）产品说明书（关键信息上BOM）!C15:K15"], "reason": "收腹、防卷与不滑脱无验证报告。"},
+          {"item_id": "claim-002", "status": "fail", "source_refs": ["（2）产品营销对接资料包!D29:H31", "（3）产品说明书（关键信息上BOM）!C17:K19"], "reason": "保暖、高弹不掉档与提臀无验证报告。"}
+        ],
+        "confidence": "high"
+      },
+      {
+        "rule_id": "cross_document_conflict",
+        "hard_fail": true,
+        "manual_review": false,
+        "finding": "同一说明书两个资料段的下单尺码范围不一致：S-2XL 与 S-XL。",
+        "items": [
+          {"item_id": "size-range", "status": "fail", "source_refs": ["（3）产品说明书（关键信息上BOM）!K4", "（3）产品说明书（关键信息上BOM）!K43"], "reason": "两处规范化尺码范围不相等。"}
+        ],
+        "confidence": "high"
+      }
+    ],
+    "completeness": {
+      "marketing_score": 70,
+      "manual_score": 13.3,
+      "raw_score": 83.3,
+      "audited_max_score": 95,
+      "audited_completeness_percent": 87.7,
+      "unreviewed_weight": 5,
+      "missing_fields": [
+        "GTM 信息包：RTB 的可定位专业/检测报告附件或链接",
+        "产品说明书：可定位的质检/验证信息"
+      ]
+    },
+    "usp_voc_brief": "VOC 对“易破、卷边、起球、脚踝断层、尺码不准”及自然透肤/保暖需求提供了市场相关性；但不能证明本品的收腹、防卷、不掉档、保暖或提臀功能，仍需本品证据。",
+    "findings": [
+      {"finding_id": "F-001", "type": "functional_validation", "status": "fail", "content": "核心卖点中的功能结果超出当前可定位证据范围。"},
+      {"finding_id": "F-002", "type": "visualization", "status": "risk", "content": "结构、量测、成分和真人上腿可作为事实展示；效果对比与绝对承诺需等待证据。"},
+      {"finding_id": "F-003", "type": "communication", "status": "risk", "content": "“收腹、多肤色适配、裸感（更薄更暖）”中的收腹和更薄更暖不能作为视觉主标题的唯一支撑。"}
+    ]
+  }
+}
