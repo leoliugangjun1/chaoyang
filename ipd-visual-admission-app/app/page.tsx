@@ -69,12 +69,41 @@ reviewed_at: 2026-08-19
 
 const fieldMap: Record<string, keyof DashboardData> = { CYA001: "report_title", CYA002: "admission_result", CYA003: "decision_summary", CYA004: "return_reasons", CYA005: "completeness_score", CYA006: "visual_advice", CYA007: "notes", SYS003: "source_summary" };
 const arrays = new Set(["return_reasons", "visual_advice", "notes", "source_summary"]);
+const headingAliases: Record<string, keyof DashboardData> = {
+  reporttitle: "report_title", 报告标题: "report_title", 审核报告: "report_title", 准入报告: "report_title",
+  admissionresult: "admission_result", 准入结果: "admission_result", 审核结论: "admission_result", 准入结论: "admission_result", 最终结论: "admission_result",
+  decisionsummary: "decision_summary", 决策摘要: "decision_summary", 结论摘要: "decision_summary", 审核摘要: "decision_summary", 判断依据: "decision_summary",
+  returnreasons: "return_reasons", 退回原因: "return_reasons", 问题清单: "return_reasons", 问题项: "return_reasons", 退回项: "return_reasons", 待处理问题: "return_reasons",
+  completenessscore: "completeness_score", 完整度评分: "completeness_score", 资料完整度: "completeness_score", 资料完整性评分: "completeness_score",
+  visualadvice: "visual_advice", 视觉建议: "visual_advice", 制作建议: "visual_advice", 视觉制作建议: "visual_advice",
+  notes: "notes", 备注: "notes", 注意事项: "notes", 风险提示: "notes", 制作边界: "notes",
+  sourcesummary: "source_summary", 来源摘要: "source_summary", 数据来源: "source_summary", 证据来源: "source_summary", 审核依据: "source_summary",
+};
+const itemKeyAliases: Record<string, string> = {
+  issueid: "issue_id", 问题id: "issue_id", 问题编号: "issue_id", 编号: "issue_id", adviceid: "advice_id", 建议id: "advice_id", noteid: "note_id", sourceid: "source_id",
+  title: "title", 标题: "title", 问题: "title", 名称: "title", reason: "reason", 原因: "reason", 描述: "reason", 问题说明: "reason",
+  severity: "severity", 严重程度: "severity", 级别: "severity", requiredaction: "required_action", 处理建议: "required_action", 建议动作: "required_action", 处理: "required_action",
+  sourceref: "source_ref", 来源引用: "source_ref", 来源: "source_ref", content: "content", 内容: "content", 建议内容: "content", priority: "priority", 优先级: "priority",
+  relatedissueid: "related_issue_id", 关联问题: "related_issue_id", type: "type", 类型: "type", sourcename: "source_name", 来源名称: "source_name", sourcetype: "source_type", 来源类型: "source_type", weight: "weight", 权重: "weight", status: "status", 状态: "status",
+};
 
 function scalar(value: string) { return value.trim().replace(/^['"]|['"]$/g, ""); }
+function normalizeLabel(value: string) { return value.toLowerCase().replace(/[\s_\-｜|:：()[\]【】]/g, ""); }
+function resolveField(heading: string) {
+  const id = heading.match(/\b([A-Z]+\d+)\b/)?.[1];
+  if (id && fieldMap[id]) return fieldMap[id];
+  const normalized = normalizeLabel(heading);
+  return headingAliases[normalized] || Object.entries(headingAliases).find(([alias]) => normalized.includes(alias))?.[1];
+}
+function normalizeItem(item: Record<string, string>) {
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(item)) normalized[itemKeyAliases[normalizeLabel(key)] || key] = value;
+  return normalized;
+}
 function yamlList(value: string) {
   const items: Record<string, string>[] = []; let current: Record<string, string> | null = null;
   for (const raw of value.split("\n")) { const line = raw.trim(); if (!line) continue; const first = line.match(/^-\s+([\w_]+):\s*(.*)$/); const pair = line.match(/^([\w_]+):\s*(.*)$/); if (first) { current = { [first[1]]: scalar(first[2]) }; items.push(current); } else if (pair && current) current[pair[1]] = scalar(pair[2]); }
-  return items;
+  return items.map(normalizeItem);
 }
 function numberedList(key: string, value: string) {
   const entries = value.split(/^\s*\d+\.\s+/m).map((entry) => entry.trim()).filter(Boolean);
@@ -89,8 +118,8 @@ function parseMarkdown(raw: string): DashboardData {
   const front = raw.match(/^---\s*\n([\s\S]*?)\n---\s*/);
   if (front) for (const line of front[1].split("\n")) { const match = line.match(/^([\w_]+):\s*(.*)$/); if (!match) continue; const key = match[1] as keyof DashboardData; if (["schema_version", "product_id", "reviewed_at"].includes(key)) (data as Record<string, unknown>)[key] = scalar(match[2]); else data.unknown_fields[key] = scalar(match[2]); }
   const body = raw.slice(front ? front[0].length : 0);
-  const headings = [...body.matchAll(/^#{1,6}\s+([A-Z]+\d+)\s*(?:\||｜)\s*[^\n]+$/gm)];
-  for (let index = 0; index < headings.length; index += 1) { const match = headings[index]; const id = match[1]; const key = fieldMap[id]; const start = (match.index ?? 0) + match[0].length; const end = index + 1 < headings.length ? (headings[index + 1].index ?? body.length) : body.length; const content = body.slice(start, end).trim(); if (!key) { data.unknown_fields[id] = content; continue; } if (arrays.has(key)) (data as Record<string, unknown>)[key] = content.startsWith("-") ? yamlList(content) : numberedList(key, content); else if (key === "completeness_score") { const score = Number(content.match(/-?\d+(?:\.\d+)?/)?.[0]); if (Number.isFinite(score)) data.completeness_score = score; } else (data as Record<string, unknown>)[key] = scalar(content); }
+  const headings = [...body.matchAll(/^#{1,6}\s+([^\n]+)$/gm)];
+  for (let index = 0; index < headings.length; index += 1) { const match = headings[index]; const heading = match[1].trim(); const key = resolveField(heading); const start = (match.index ?? 0) + match[0].length; const end = index + 1 < headings.length ? (headings[index + 1].index ?? body.length) : body.length; const content = body.slice(start, end).trim(); if (!key) { if (!data.report_title && match[0].startsWith("# ") && /报告|report/i.test(heading)) data.report_title = heading; else data.unknown_fields[heading] = content; continue; } if (arrays.has(key)) (data as Record<string, unknown>)[key] = content.startsWith("-") ? yamlList(content) : numberedList(key, content); else if (key === "completeness_score") { const score = Number(content.match(/-?\d+(?:\.\d+)?/)?.[0]); if (Number.isFinite(score)) data.completeness_score = score; } else (data as Record<string, unknown>)[key] = scalar(content); }
   return data;
 }
 function parseJson(raw: string): DashboardData {

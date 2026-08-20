@@ -15,11 +15,13 @@ npm.cmd run dev
 npm.cmd run build
 ```
 
+GitHub Pages 发布后访问：`https://leoliugangjun1.github.io/chaoyang/`。
+
 ## 输入协议
 
 - 接受本地 `.md` 和 `.json` 文件。
 - Markdown frontmatter 或 JSON 顶层必须包含 `schema_version: ipd-admission-v1`。
-- Markdown 正文根据稳定字段 ID 解析，例如 `## CYA002 | admission_result`；JSON 直接读取协议顶层字段。
+- Markdown 优先根据稳定字段 ID 解析，例如 `## CYA002 | admission_result`；也兼容常见的中英文 AI 标题别名，例如「审核结论」「问题清单」「资料完整度」和「数据来源」。JSON 直接读取协议顶层字段。
 - 支持的结果为：`通过`、`有条件通过`、`不通过`。
 - UI 不从摘要推断结果、不计算完整度评分、不重排数组，也不补充业务结论。
 
