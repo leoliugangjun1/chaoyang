@@ -1,0 +1,2 @@
+.frame-area{min-height:calc(100vh - 190px);border:1px solid var(--line);border-radius:8px;background:#fff}
+.gallery-only .gallery-title p{color:var(--muted);font-size:14px;font-weight:400}

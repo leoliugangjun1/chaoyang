@@ -1,0 +1,1 @@
+{"schemaVersion":"1.0","moduleId":"model.dress-change","name":"模特换装","description":"将服装参考和补充要求提交给受控的图像生成能力。","version":"1.0.0","category":"模特形象调整","entryType":"declarative","permissions":["image.read","image.validate","image.generate","image.download","history.write"],"resourceProfile":{"estimatedApiCalls":1,"estimatedOutputCount":1,"estimatedCost":0,"riskLevel":"medium"}}

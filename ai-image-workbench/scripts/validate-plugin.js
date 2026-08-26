@@ -1,0 +1,5 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+const requested = process.argv[2];
+if (!requested) { console.error('Usage: npm run validate:plugin -- ../ai-workbench-plugins/<id>/<version>'); process.exit(1); }
+try { const dir = path.join(process.cwd(), requested); const manifest = JSON.parse(await fs.readFile(path.join(dir, 'plugin.manifest.json'), 'utf8')); const capabilities = JSON.parse(await fs.readFile(path.join(dir, 'capabilities.json'), 'utf8')); const config = JSON.parse(await fs.readFile(path.join(dir, 'config.schema.json'), 'utf8')); if (!manifest.pluginId || !manifest.version || !Array.isArray(manifest.provides)) throw new Error('Manifest requires pluginId, version, and provides.'); if (!Array.isArray(capabilities.capabilities) || capabilities.capabilities.some((item) => !manifest.provides.includes(item.name))) throw new Error('Capabilities must be declared by the manifest.'); if (!Array.isArray(config.fields)) throw new Error('Config schema requires a fields array.'); console.log(`Valid: ${manifest.pluginId}@${manifest.version}`); } catch (error) { console.error(`PLUGIN_INVALID: ${error.message}`); process.exit(1); }

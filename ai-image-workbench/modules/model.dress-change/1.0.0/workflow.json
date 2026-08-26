@@ -1,0 +1,1 @@
+{"schemaVersion":"1.0","steps":[{"id":"validate-input","action":"image.validate","inputs":{},"timeoutMs":5000,"onError":"stop"},{"id":"generate-image","action":"image.generate","inputs":{},"timeoutMs":60000,"retry":{"maxAttempts":1},"onError":"stop"}]}
