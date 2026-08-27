@@ -2,11 +2,11 @@
 
 ## Completed Stage
 
-The completed and frozen stage is **Basic image generation**. It is the stable baseline for this application.
+The completed baseline includes **Basic image generation** and **Virtual model composition**. Basic image generation remains the protected Stable Baseline; virtual model composition is an independent business page inside the same application.
 
 ## Application Shape
 
-This is one application with one browser shell and left navigation. The business modules are Basic image generation, Virtual model composition, Action variation, and Generation history. Only Basic image generation is currently implemented as a verified workflow; the other navigation entries are not separate applications.
+This is one application with one browser shell and left navigation. The business modules are Basic image generation, Virtual model composition, Action variation, and Generation history. Basic image generation and Virtual model composition currently have working browser pages. Action variation and a standalone Generation history page remain future work.
 
 ## Current Main Page and Components
 
@@ -86,9 +86,10 @@ Browser verification confirmed that all eight ratio options render and are selec
 
 ## Known Issues
 
-1. Google reference images are not currently included in the native Gemini request body. This is the real remaining Google image-to-image limitation.
-2. The most recent GPT text-to-image validation request reached the configured provider timeout after sending the correct mapped request. The task records the provider timeout.
-3. Current navigation entries for Virtual model composition, Action variation, and Generation history are not implemented as independent verified business workflows.
+1. The virtual model page stores its browser workspace snapshot and selected-result state in `localStorage`; task and asset records remain server-side.
+2. A virtual model generation round is represented in the browser as two provider tasks. The server does not currently expose a native parent-round entity.
+3. The main page navigation still has placeholder entries for Action variation and Generation history. Virtual model navigation is available through its page entry, while the main-shell navigation integration should be handled as a separate scoped task.
+4. The most recent GPT text-to-image validation request reached the configured provider timeout after sending the correct mapped request. The task records the provider timeout.
 
 ## Basic Image Generation Protection
 

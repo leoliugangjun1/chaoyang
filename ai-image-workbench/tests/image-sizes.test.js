@@ -46,6 +46,15 @@ test('generation task records result metadata from its effective settings', asyn
   process.env = saved;
 });
 
+test('a virtual model 2K request resolves to a configured 2K image2 size', () => {
+  const saved = { ...process.env };
+  Object.assign(process.env, { OPENAI_IMAGE_SIZE_2K_LANDSCAPE: '2048x1152', OPENAI_IMAGE_SIZE_2K_SQUARE: '2048x2048' });
+  const runtime = new WorkbenchRuntime(process.cwd());
+  assert.equal(runtime.gptSizeFor({ aspectRatio: '4:3', resolutionTier: '2K' }), '2048x1152');
+  assert.equal(runtime.gptSizeFor({ aspectRatio: '3:4', resolutionTier: '2K' }), '2048x2048');
+  process.env = saved;
+});
+
 test('generation task preserves the submitted reference image order', async () => {
   const runtime = new WorkbenchRuntime(process.cwd());
   runtime.generationQueue = { add: (job) => job() };
@@ -105,11 +114,15 @@ test('providers map a business aspect ratio and resolution tier independently', 
       request = { url, body: JSON.parse(init.body) };
       return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'aGVsbG8=' } }] } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     };
+    const referencePath = path.join(dir, 'reference.png');
+    await fs.writeFile(referencePath, Buffer.from('reference-image'));
     const runtime = new WorkbenchRuntime(process.cwd());
+    runtime.asset = async () => ({ localPath: referencePath, mimeType: 'image/png' });
     assert.equal(runtime.gptSizeFor({ aspectRatio: '16:9', resolutionTier: '4K' }), '3840x2160');
-    await runtime.generateWithNanoBanana({ prompt: 'test', settings: { aspectRatio: '16:9', resolutionTier: '2K' } }, 'result', output);
+    await runtime.generateWithNanoBanana({ prompt: 'test', referenceAssetIds: ['asset_primary', 'asset_secondary'], settings: { aspectRatio: '16:9', resolutionTier: '2K' } }, 'result', output);
     assert.equal(request.url, 'https://api.openlux.ai/v1beta/models/gemini-3-pro-image:generateContent');
     assert.deepEqual(request.body.generationConfig.imageConfig, { aspectRatio: '16:9', imageSize: '2K' });
+    assert.deepEqual(request.body.contents[0].parts, [{ text: 'test' }, { inlineData: { mimeType: 'image/png', data: Buffer.from('reference-image').toString('base64') } }, { inlineData: { mimeType: 'image/png', data: Buffer.from('reference-image').toString('base64') } }]);
     assert.equal((await fs.readFile(output)).toString(), 'hello');
   } finally {
     globalThis.fetch = savedFetch;
