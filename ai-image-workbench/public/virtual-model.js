@@ -206,7 +206,7 @@ function render() {
   const selectedCount = state.selectedInstructionIds.length;
   const promptLength = state.prompt.length;
   root.innerHTML = `<header class="topbar"><div class="brand"><span class="brand-mark">✦</span><div><strong>影像实验室</strong><small>VIRTUAL MODEL WORKBENCH</small></div></div><div class="top-status"><span class="online-dot"></span> 服务在线 <button class="ghost" type="button">设置</button><span class="avatar">A</span></div></header>
-    <div class="shell"><aside class="sidebar"><div class="side-title">生图工作台</div><a class="nav" href="/">⌘ <span>基础生图</span></a><a class="nav active" href="/virtual-model.html" aria-current="page">♢ <span>虚拟模特合成</span></a><button class="nav" type="button">◌ <span>动作裂变</span></button><button class="nav" type="button">▦ <span>生成历史</span></button></aside>
+    <div class="shell"><aside class="sidebar"><div class="side-title">生图工作台</div><a class="nav" href="/">⌘ <span>基础生图</span></a><a class="nav active" href="/virtual-model.html" aria-current="page">♢ <span>虚拟模特合成</span></a><a class="nav" href="/action-variation.html">◌ <span>模特动作裂变</span></a><button class="nav" type="button">▦ <span>生成历史</span></button></aside>
     <main class="vm-main"><aside class="vm-controls"><div class="vm-control-heading"><div><p class="eyebrow">VIRTUAL MODEL</p><h1>虚拟模特合成</h1></div></div>
       <div class="vm-images">${imageCard('图片 1', state.primaryAsset, '身材参考（主体）')}${imageCard('图片 2', state.secondaryAsset, '脸部/发型参考（补充）')}</div>
       <label class="vm-field-label" for="prompt">提示词 <span>可选</span></label><textarea id="prompt" maxlength="1000" placeholder="例如：清晨柔光，室内自然站，简约背景，自然肤色，高级质感…">${escapeHtml(state.prompt)}</textarea><div class="vm-count"><span>默认融合策略：主图身材与构图，补充图脸部与发型</span><span>${promptLength} / 1000</span></div>

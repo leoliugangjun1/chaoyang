@@ -4,14 +4,18 @@ import crypto from 'node:crypto';
 import { CAPABILITIES, PlatformError } from '../src/shared/protocol.js';
 import { PluginManager } from './plugin-manager.js';
 import { GenerationTaskQueue } from './generation-queue.js';
+import { OpenAiCompatibleLlmClient } from './llm-client.js';
+import { planActionVariation } from './action-variation-planner.js';
+import { ACTION_CANDIDATES, createGenerationJobs } from './action-candidates.js';
+import { TemporaryImageHost } from './temporary-image-host.js';
 
 const json = async (file) => JSON.parse(await fs.readFile(file, 'utf8'));
 const now = () => new Date().toISOString();
 const id = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 
 export class WorkbenchRuntime {
-  constructor(root, options = {}) { this.root = root; this.dataDir = path.join(root, 'data'); this.tasks = new Map(); this.modules = []; this.quarantine = []; this.templates = []; this.pluginManager = new PluginManager(root, options.pluginRoot); this.generationQueue = null; this.debugLogPath = path.join(this.dataDir, 'logs', 'image2-trace.ndjson'); }
-  async initialize() { await this.loadServerEnv(); this.generationQueue = new GenerationTaskQueue({ concurrency: Number(process.env.GENERATION_CONCURRENCY || process.env.MAX_CONCURRENCY || 2) }); for (const dir of ['assets', 'history', 'logs', 'registry', 'uploads', 'results']) await fs.mkdir(path.join(this.dataDir, dir), { recursive: true }); await this.discoverModules(); await this.pluginManager.initialize(); await this.loadHistory(); await this.loadTemplates(); }
+  constructor(root, options = {}) { this.root = root; this.dataDir = path.join(root, 'data'); this.tasks = new Map(); this.actionBatches = new Map(); this.modules = []; this.quarantine = []; this.templates = []; this.llmClient = options.llmClient || null; this.temporaryImageHost = options.temporaryImageHost || new TemporaryImageHost(); this.pluginManager = new PluginManager(root, options.pluginRoot); this.generationQueue = null; this.debugLogPath = path.join(this.dataDir, 'logs', 'image2-trace.ndjson'); }
+  async initialize() { await this.loadServerEnv(); this.generationQueue = new GenerationTaskQueue({ concurrency: Number(process.env.GENERATION_CONCURRENCY || process.env.MAX_CONCURRENCY || 2) }); for (const dir of ['assets', 'action-batches', 'history', 'logs', 'registry', 'uploads', 'results']) await fs.mkdir(path.join(this.dataDir, dir), { recursive: true }); await this.discoverModules(); await this.pluginManager.initialize(); await this.loadHistory(); await this.loadActionBatches(); await this.loadTemplates(); }
   async debugLog(event) { try { await fs.appendFile(this.debugLogPath, `${JSON.stringify({ at: now(), ...event })}\n`, 'utf8'); } catch {} }
   async loadServerEnv() { try { const text = await fs.readFile(path.join(this.root, '.env'), 'utf8'); for (const line of text.split(/\r?\n/)) { const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/); if (match && !process.env[match[1]]) process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, ''); } } catch {} }
   config() { return { providers: { image2: Boolean(process.env.OPENAI_API_KEY), nanoBanana: Boolean(process.env.OPENLUX_API_KEY || process.env.GOOGLE_API_KEY) }, defaultProvider: process.env.DEFAULT_IMAGE_PROVIDER || 'image2', outputDir: this.dataDir, maxConcurrency: this.generationQueue?.concurrency || Number(process.env.MAX_CONCURRENCY || 2), imageSizes: this.imageSizeOptions() }; }
@@ -19,8 +23,94 @@ export class WorkbenchRuntime {
   async persistTemplates() { await fs.writeFile(path.join(this.dataDir, 'templates.json'), JSON.stringify(this.templates, null, 2)); }
   async createTemplate(input) { const template = { id: id('tpl'), category: input.category || '未分类', name: input.name || '未命名动作', prompt: input.prompt || '', negativePrompt: input.negativePrompt || '', providers: input.providers || ['image2', 'nano_banana'], favorite: Boolean(input.favorite), createdAt: now(), updatedAt: now() }; this.templates.unshift(template); await this.persistTemplates(); return template; }
   async updateTemplate(templateId, input) { const template = this.templates.find((item) => item.id === templateId); if (!template) throw new PlatformError('TEMPLATE_NOT_FOUND', '动作模板不存在。'); Object.assign(template, input, { updatedAt: now() }); await this.persistTemplates(); return template; }
+  async createActionVariationBatch(input) {
+    const sourceAssetId = input.sourceAssetId;
+    const templateIds = [...new Set(input.templateIds || [])];
+    const providers = [...new Set(input.providers || [])];
+    if (!sourceAssetId) throw new PlatformError('ACTION_BATCH_INVALID', 'A source image is required.');
+    if (!providers.length || providers.some((provider) => !['image2', 'nano_banana'].includes(provider))) throw new PlatformError('ACTION_BATCH_INVALID', 'Select at least one supported provider.');
+    const templates = templateIds.map((templateId) => this.templates.find((template) => template.id === templateId)).filter(Boolean);
+    if (templates.length !== templateIds.length) throw new PlatformError('ACTION_BATCH_INVALID', 'One or more action templates are unavailable.');
+    const sourceAsset = await this.asset(sourceAssetId);
+    const batch = { batchId: id('action_batch'), sourceAssetId, templateIds, providers, settings: input.settings || {}, extraPrompt: input.extraPrompt || '', outputCount: 1, status: 'queued', actionPlans: [], jobs: [], createdAt: now(), updatedAt: now() };
+    this.actionBatches.set(batch.batchId, batch);
+    await this.persistActionBatch(batch);
+    try {
+      const jobs = createGenerationJobs({ assetId: sourceAsset.assetId, name: sourceAsset.name, extraPrompt: batch.extraPrompt }, providers);
+      const plansByAction = new Map(ACTION_CANDIDATES.map((action) => [action.id, { actionPlanId: id('action_plan'), templateId: action.id, name: action.name, actionGuidance: action.promptSuffix, generationPrompt: jobs.find((job) => job.actionId === action.id)?.fullPrompt || '', providerTaskIds: {} }]));
+      batch.subjectProfile = 'Reference image identity and clothing must be preserved.';
+      batch.actionPlans = [...plansByAction.values()];
+      batch.jobs = jobs;
+      batch.updatedAt = now();
+      await this.persistActionBatch(batch);
+      // Every job maps to one provider request. With two providers this creates 12 + 12 independent tasks.
+      const submissions = await Promise.allSettled(jobs.map(async (job) => {
+        job.status = 'loading';
+        const plan = plansByAction.get(job.actionId);
+        const task = await this.createGeneration({ provider: job.provider, prompt: job.fullPrompt, outputCount: 1, referenceAssetIds: [sourceAssetId], actionTemplateId: job.actionId, actionPlanId: plan.actionPlanId, actionBatchId: batch.batchId, settings: batch.settings });
+        job.taskId = task.taskId;
+        job.result = task.images?.[0]?.url || null;
+        plan.providerTaskIds[job.provider] = task.taskId;
+      }));
+      submissions.forEach((submission, index) => {
+        if (submission.status === 'rejected') {
+          jobs[index].status = 'error';
+          jobs[index].error = submission.reason?.message || 'Generation task was not created.';
+        }
+      });
+      batch.status = jobs.some((job) => job.status !== 'error') ? 'generating' : 'failed';
+      batch.updatedAt = now();
+      await this.persistActionBatch(batch);
+      return this.actionVariationBatch(batch.batchId);
+    } catch (error) {
+      batch.status = 'planning_failed';
+      batch.error = { code: error.code || 'ACTION_PLAN_FAILED', message: error.message };
+      batch.updatedAt = now();
+      await this.persistActionBatch(batch);
+      throw error;
+    }
+  }
+  actionVariationBatch(batchId) {
+    const batch = this.actionBatches.get(batchId);
+    if (!batch) throw new PlatformError('ACTION_BATCH_NOT_FOUND', 'Action variation batch not found.');
+    const taskForJob = (job) => this.tasks.get(job.taskId);
+    return { ...batch, jobs: (batch.jobs || []).map((job) => { const task = taskForJob(job); const result = (task?.images || task?.results || []).find((item) => item.assetId || item.url); return { ...job, status: task?.status === 'completed' ? 'success' : task?.status === 'failed' ? 'error' : job.status, result: result?.url || (result?.assetId ? `/api/assets/${result.assetId}` : job.result), error: task?.status === 'failed' ? (task.images || task.results || []).find((item) => item.error)?.error || job.error : job.error }; }), actionPlans: batch.actionPlans.map((plan) => ({ ...plan, providerTasks: Object.fromEntries(Object.entries(plan.providerTaskIds || {}).map(([provider, taskId]) => [provider, this.tasks.get(taskId)]).filter(([, task]) => task)) })) };
+  }
+  async retryActionVariationJob(jobId) {
+    const batch = [...this.actionBatches.values()].find((candidate) => candidate.jobs?.some((job) => job.jobId === jobId));
+    if (!batch) throw new PlatformError('ACTION_JOB_NOT_FOUND', 'Action variation job not found.');
+    const job = batch.jobs.find((candidate) => candidate.jobId === jobId);
+    const currentTask = this.tasks.get(job.taskId);
+    if (['queued', 'processing', 'running'].includes(currentTask?.status)) throw new PlatformError('ACTION_JOB_ACTIVE', 'This action variation job is already generating.');
+    const plan = batch.actionPlans.find((candidate) => candidate.templateId === job.actionId);
+    if (!plan) throw new PlatformError('ACTION_PLAN_NOT_FOUND', 'Action variation plan not found.');
+
+    // A retry creates exactly one one-image task for the requested job.
+    job.status = 'loading';
+    job.result = null;
+    job.error = null;
+    batch.updatedAt = now();
+    await this.persistActionBatch(batch);
+    try {
+      const task = await this.createGeneration({ provider: job.provider, prompt: job.fullPrompt, outputCount: 1, referenceAssetIds: [batch.sourceAssetId], actionTemplateId: job.actionId, actionPlanId: plan.actionPlanId, actionBatchId: batch.batchId, settings: batch.settings });
+      job.taskId = task.taskId;
+      plan.providerTaskIds[job.provider] = task.taskId;
+      batch.status = 'generating';
+      batch.updatedAt = now();
+      await this.persistActionBatch(batch);
+      return this.actionVariationBatch(batch.batchId);
+    } catch (error) {
+      job.status = 'error';
+      job.error = error.message || 'Generation task was not created.';
+      batch.updatedAt = now();
+      await this.persistActionBatch(batch);
+      throw error;
+    }
+  }
+  async persistActionBatch(batch) { await fs.writeFile(path.join(this.dataDir, 'action-batches', `${batch.batchId}.json`), JSON.stringify(batch, null, 2)); }
+  async loadActionBatches() { try { for (const entry of await fs.readdir(path.join(this.dataDir, 'action-batches'))) if (entry.endsWith('.json')) { const batch = await json(path.join(this.dataDir, 'action-batches', entry)); this.actionBatches.set(batch.batchId, batch); } } catch {} }
   async createUpload(input) { if (!input.data || !String(input.data).includes(',')) throw new PlatformError('UPLOAD_INVALID', '图片数据无效。'); const assetId = id('asset'); const mimeType = input.mimeType || 'image/png'; const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'png'; const localPath = path.join(this.dataDir, 'uploads', `${assetId}.${ext}`); await fs.writeFile(localPath, Buffer.from(String(input.data).split(',').pop(), 'base64')); const asset = { assetId, name: input.name || `${assetId}.${ext}`, localPath, mimeType, url: `/api/assets/${assetId}`, createdAt: now() }; await fs.writeFile(path.join(this.dataDir, 'registry', `${assetId}.json`), JSON.stringify(asset, null, 2)); return asset; }
-  async createGeneration(input) { const count = [1, 2, 4, 10].includes(Number(input.outputCount)) ? Number(input.outputCount) : 1; const images = Array.from({ length: count }, (_, index) => ({ id: id('result'), index, status: 'waiting' })); const provider = input.provider || 'image2'; const requestedResolution = input.settings?.resolution || 'auto'; const autoResolution = provider === 'image2' && requestedResolution === 'auto' && input.referenceAssetIds?.length ? await this.referenceResolutionFor(input.referenceAssetIds[0]) : 'auto'; const resolutionTier = ['1K', '2K', '4K'].includes(input.settings?.resolutionTier) ? input.settings.resolutionTier : null; const settings = { mode: input.settings?.mode || input.mode || 'image_to_image', aspectRatio: input.settings?.aspectRatio || input.ratio || 'auto', resolutionTier, resolution: autoResolution === 'auto' ? requestedResolution : autoResolution, quality: input.settings?.quality || 'auto', background: input.settings?.background || 'auto' }; const resolution = provider === 'nano_banana' ? (settings.resolutionTier || '1K') : this.gptSizeFor(settings); const task = { taskId: id('task'), requestId: id('req'), type: settings.mode, provider, model: this.modelFor(provider), resolution, imageRatio: provider === 'nano_banana' ? settings.aspectRatio : this.ratioForSize(resolution), prompt: input.prompt || '', negativePrompt: input.negativePrompt || '', referenceAssetIds: input.referenceAssetIds || [], actionTemplateId: input.actionTemplateId || null, settings, requestedImageCount: count, outputCount: count, status: 'queued', progress: 0, results: images, images, createdAt: now(), updatedAt: now() }; await this.debugLog({ phase: 'task.created', requestId: task.requestId, taskId: task.taskId, provider: task.provider, outputCount: count, prompt: task.prompt, settings, referenceCount: task.referenceAssetIds.length }); this.tasks.set(task.taskId, task); await this.persistTask(task); queueMicrotask(() => this.runGeneration(task)); return task; }
+  async createGeneration(input) { const count = [1, 2, 4, 10].includes(Number(input.outputCount)) ? Number(input.outputCount) : 1; const images = Array.from({ length: count }, (_, index) => ({ id: id('result'), index, status: 'waiting' })); const provider = input.provider || 'image2'; const requestedResolution = input.settings?.resolution || 'auto'; const autoResolution = provider === 'image2' && requestedResolution === 'auto' && input.referenceAssetIds?.length ? await this.referenceResolutionFor(input.referenceAssetIds[0]) : 'auto'; const resolutionTier = ['1K', '2K', '4K'].includes(input.settings?.resolutionTier) ? input.settings.resolutionTier : null; const settings = { mode: input.settings?.mode || input.mode || 'image_to_image', aspectRatio: input.settings?.aspectRatio || input.ratio || 'auto', resolutionTier, resolution: autoResolution === 'auto' ? requestedResolution : autoResolution, quality: input.settings?.quality || 'auto', background: input.settings?.background || 'auto' }; const resolution = provider === 'nano_banana' ? (settings.resolutionTier || '1K') : this.gptSizeFor(settings); const task = { taskId: id('task'), requestId: id('req'), type: settings.mode, provider, model: this.modelFor(provider), resolution, imageRatio: provider === 'nano_banana' ? settings.aspectRatio : this.ratioForSize(resolution), prompt: input.prompt || '', negativePrompt: input.negativePrompt || '', referenceAssetIds: input.referenceAssetIds || [], actionTemplateId: input.actionTemplateId || null, actionPlanId: input.actionPlanId || null, actionBatchId: input.actionBatchId || null, settings, requestedImageCount: count, outputCount: count, status: 'queued', progress: 0, results: images, images, createdAt: now(), updatedAt: now() }; await this.debugLog({ phase: 'task.created', requestId: task.requestId, taskId: task.taskId, provider: task.provider, outputCount: count, prompt: task.prompt, settings, referenceCount: task.referenceAssetIds.length }); this.tasks.set(task.taskId, task); await this.persistTask(task); queueMicrotask(() => this.runGeneration(task)); return task; }
   async runGeneration(task) { task.status = 'processing'; task.updatedAt = now(); await this.persistTask(task); const jobs = Array.from({ length: task.requestedImageCount }, (_, index) => this.generationQueue.add(async () => { const result = task.images[index]; result.status = 'running'; result.startedAt = now(); task.updatedAt = now(); await this.persistTask(task); try { const asset = await this.generateImage(task, index); Object.assign(result, asset, { status: 'success', completedAt: now() }); } catch (error) { Object.assign(result, { status: 'failed', error: error.message, completedAt: now() }); } task.progress = Math.round((task.images.filter((item) => ['success', 'failed'].includes(item.status)).length / task.requestedImageCount) * 100); task.updatedAt = now(); await this.persistTask(task); return result; })); await Promise.allSettled(jobs); task.status = task.images.every((item) => item.status === 'success') ? 'completed' : task.images.some((item) => item.status === 'success') ? 'partial' : 'failed'; task.completedAt = now(); task.durationMs = Date.parse(task.completedAt) - Date.parse(task.createdAt); task.updatedAt = task.completedAt; await this.persistTask(task); }
   async generateImage(task, index) {
     const outputId = id('result'); const outputPath = path.join(this.dataDir, 'results', `${outputId}.png`);
@@ -39,10 +129,11 @@ export class WorkbenchRuntime {
   async writeProviderImage(data, outputPath) { const find = (value) => { if (!value) return null; if (typeof value === 'string' && value.startsWith('data:image/')) return value; if (typeof value === 'string' && /^https?:\/\//.test(value)) return value; if (typeof value === 'object') { if (value.b64_json) return `data:image/png;base64,${value.b64_json}`; for (const item of Object.values(value)) { const found = find(item); if (found) return found; } } return null; }; const source = find(data); if (!source) throw new Error('Provider response did not contain an image.'); const buffer = source.startsWith('data:') ? Buffer.from(source.split(',')[1], 'base64') : Buffer.from(await (await fetch(source)).arrayBuffer()); await fs.writeFile(outputPath, buffer); }
   imageSizeOptions() { const prefix = 'OPENAI_IMAGE_SIZE_'; return Object.entries(process.env).filter(([key]) => key.startsWith(prefix)).map(([key, size]) => ({ id: key.slice(prefix.length).toLowerCase(), label: key.slice(prefix.length).replaceAll('_', ' '), size })).filter(({ size }) => this.isValidImageSize(size)).sort((left, right) => (left.id === 'auto' ? -1 : right.id === 'auto' ? 1 : left.id.localeCompare(right.id))); }
   isValidImageSize(size) { if (size === 'auto') return true; const match = String(size).match(/^(\d+)x(\d+)$/); if (!match) return false; const [width, height] = match.slice(1).map(Number); const multiple = Number(process.env.IMAGE_SIZE_MULTIPLE_PX || 16); const maxEdge = Number(process.env.IMAGE_MAX_EDGE_PX || 3840); const maxRatio = Number(process.env.IMAGE_MAX_ASPECT_RATIO || 3); return width > 0 && height > 0 && width <= maxEdge && height <= maxEdge && width % multiple === 0 && height % multiple === 0 && Math.max(width, height) / Math.min(width, height) <= maxRatio; }
+  exactTierSizeForRatio(tier, aspectRatio, candidates = []) { const target = String(aspectRatio || '').split(':').map(Number); if (target.length !== 2 || target.some((value) => !Number.isFinite(value) || value <= 0)) return null; const multiple = Number(process.env.IMAGE_SIZE_MULTIPLE_PX || 16); const configuredLongEdge = candidates.map((option) => option.size.split('x').map(Number)).flat().filter(Number.isFinite).reduce((max, value) => Math.max(max, value), 0); const longEdge = configuredLongEdge || ({ '1k': 1536, '2k': 2048, '4k': 3840 }[tier] || 1024); const ratio = target[0] / target[1]; const width = ratio >= 1 ? longEdge : Math.max(multiple, Math.round((longEdge * ratio) / multiple) * multiple); const height = ratio >= 1 ? Math.max(multiple, Math.round((longEdge / ratio) / multiple) * multiple) : longEdge; const size = `${width}x${height}`; return this.isValidImageSize(size) ? size : null; }
   async referenceResolutionFor(assetId) { try { const asset = await this.asset(assetId); const dimensions = this.imageDimensions(await fs.readFile(asset.localPath)); if (!dimensions) return 'auto'; const candidates = this.imageSizeOptions().filter((option) => option.size !== 'auto').map((option) => ({ ...option, dimensions: option.size.split('x').map(Number) })); return candidates.reduce((best, option) => { const score = Math.abs(Math.log(option.dimensions[0] / dimensions.width)) + Math.abs(Math.log(option.dimensions[1] / dimensions.height)); return !best || score < best.score ? { id: option.id, score } : best; }, null)?.id || 'auto'; } catch { return 'auto'; } }
   imageDimensions(buffer) { if (buffer.length >= 24 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) }; if (buffer.length >= 30 && buffer.subarray(0, 4).toString() === 'RIFF' && buffer.subarray(8, 12).toString() === 'WEBP') { const type = buffer.subarray(12, 16).toString(); if (type === 'VP8X') return { width: 1 + buffer.readUIntLE(24, 3), height: 1 + buffer.readUIntLE(27, 3) }; if (type === 'VP8 ' && buffer.subarray(23, 26).equals(Buffer.from([157, 1, 42]))) return { width: buffer.readUInt16LE(26) & 0x3fff, height: buffer.readUInt16LE(28) & 0x3fff }; if (type === 'VP8L' && buffer[20] === 47) return { width: 1 + buffer[21] + ((buffer[22] & 63) << 8), height: 1 + ((buffer[22] >> 6) | (buffer[23] << 2) | ((buffer[24] & 15) << 10)) }; } if (buffer.length >= 4 && buffer[0] === 255 && buffer[1] === 216) { for (let offset = 2; offset + 9 < buffer.length;) { if (buffer[offset] !== 255) { offset += 1; continue; } const marker = buffer[offset + 1]; const length = buffer.readUInt16BE(offset + 2); if ([192, 193, 194, 195, 197, 198, 199, 201, 202, 203].includes(marker)) return { width: buffer.readUInt16BE(offset + 7), height: buffer.readUInt16BE(offset + 5) }; offset += length + 2; } } return null; }
   sizeFor(ratio, resolution) { const configured = this.imageSizeOptions().find((option) => option.id === resolution); return configured?.size || ({ '1:1': '1024x1024', '3:4': '1024x1536', '4:3': '1536x1024', '16:9': '1536x1024', '9:16': '1024x1536' }[ratio] || '1024x1024'); }
-  gptSizeFor(settings = {}) { const aspectRatio = settings.aspectRatio || settings.ratio || 'auto'; if (!settings.resolutionTier) return this.sizeFor(aspectRatio, settings.resolution || '1k'); if (aspectRatio === 'auto') return 'auto'; const tier = String(settings.resolutionTier).toLowerCase(); const target = aspectRatio.split(':').map(Number); const targetRatio = target.length === 2 && target.every(Number.isFinite) ? target[0] / target[1] : 1; const candidates = this.imageSizeOptions().filter((option) => option.id.startsWith(tier) && option.size !== 'auto'); if (!candidates.length) return this.sizeFor(aspectRatio, settings.resolution || '1k'); return candidates.reduce((best, option) => { const [width, height] = option.size.split('x').map(Number); const score = Math.abs(Math.log((width / height) / targetRatio)); return !best || score < best.score ? { size: option.size, score } : best; }, null).size; }
+  gptSizeFor(settings = {}) { const aspectRatio = settings.aspectRatio || settings.ratio || 'auto'; if (!settings.resolutionTier) return this.sizeFor(aspectRatio, settings.resolution || '1k'); if (aspectRatio === 'auto') return 'auto'; const tier = String(settings.resolutionTier).toLowerCase(); const target = aspectRatio.split(':').map(Number); const targetRatio = target.length === 2 && target.every(Number.isFinite) ? target[0] / target[1] : 1; const candidates = this.imageSizeOptions().filter((option) => option.id.startsWith(tier) && option.size !== 'auto'); const best = candidates.reduce((winner, option) => { const [width, height] = option.size.split('x').map(Number); const score = Math.abs(Math.log((width / height) / targetRatio)); return !winner || score < winner.score ? { size: option.size, score } : winner; }, null); if (best?.score === 0) return best.size; return this.exactTierSizeForRatio(tier, aspectRatio, candidates) || best?.size || this.sizeFor(aspectRatio, settings.resolution || '1k'); }
   modelFor(provider) { return provider === 'nano_banana' ? (process.env.OPENLUX_IMAGE_MODEL || process.env.GOOGLE_IMAGE_MODEL || 'gemini-2.5-flash-image') : (process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2'); }
   ratioForSize(size) { const match = String(size).match(/^(\d+)x(\d+)$/); if (!match) return 'auto'; const [width, height] = match.slice(1).map(Number); const gcd = (left, right) => right ? gcd(right, left % right) : left; const divisor = gcd(width, height); return `${width / divisor}:${height / divisor}`; }
   async retryResult(resultId) { for (const task of this.tasks.values()) { const result = (task.images || task.results || []).find((item) => item.id === resultId); if (result) { result.status = 'waiting'; task.results = task.images = task.images || task.results; task.status = 'processing'; await this.persistTask(task); await this.generationQueue.add(async () => { result.status = 'running'; result.startedAt = now(); try { Object.assign(result, await this.generateImage(task, result.index), { status: 'success', completedAt: now() }); } catch (error) { Object.assign(result, { status: 'failed', error: error.message, completedAt: now() }); } }); task.status = task.images.every((item) => item.status === 'success') ? 'completed' : 'partial'; await this.persistTask(task); return task; } } throw new PlatformError('RESULT_NOT_FOUND', '结果不存在。'); }

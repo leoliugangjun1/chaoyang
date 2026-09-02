@@ -22,6 +22,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/templates') return respond(res, 201, { template: await runtime.createTemplate(await body(req)) });
     if (req.method === 'PATCH' && url.pathname.startsWith('/api/templates/')) return respond(res, 200, { template: await runtime.updateTemplate(url.pathname.split('/').pop(), await body(req)) });
     if (req.method === 'POST' && url.pathname === '/api/assets') return respond(res, 201, { asset: await runtime.createUpload(await body(req)) });
+    if (req.method === 'POST' && url.pathname === '/api/action-variation/batches') return respond(res, 202, { batch: await runtime.createActionVariationBatch(await body(req)) });
+    if (req.method === 'GET' && url.pathname.startsWith('/api/action-variation/batches/')) return respond(res, 200, { batch: runtime.actionVariationBatch(url.pathname.split('/').pop()) });
+    if (req.method === 'POST' && /^\/api\/action-variation\/jobs\/[^/]+\/retry$/.test(url.pathname)) return respond(res, 202, { batch: await runtime.retryActionVariationJob(url.pathname.split('/')[4]) });
     if (req.method === 'POST' && url.pathname === '/api/generate') return respond(res, 202, { task: await runtime.createGeneration(await body(req)) });
     if (req.method === 'POST' && url.pathname.startsWith('/api/results/') && url.pathname.endsWith('/retry')) return respond(res, 202, { task: await runtime.retryResult(url.pathname.split('/')[3]) });
     if (req.method === 'GET' && url.pathname === '/api/modules') return respond(res, 200, { modules: runtime.listModules(), quarantine: runtime.quarantine });

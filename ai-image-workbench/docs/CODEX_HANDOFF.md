@@ -1,5 +1,68 @@
 # AI Image Workbench Handoff
 
+## Current Continuation: Model Action Variation (2026-08-27)
+
+This section supersedes earlier statements in this document that describe Action variation as future work.
+
+### Delivered Scope
+
+- The sidebar item in the "生图工作台" area is named "模特动作裂变" and opens `/action-variation.html`.
+- The page creates 12 fixed action candidates for each of two providers. A normal submission creates 24 independent image-generation tasks: 12 `image2` tasks and 12 `nano_banana` tasks.
+- Each task has one action and `outputCount: 1`. Do not merge actions or ask an image provider for a grid, collage, contact sheet, multiple poses, or multiple images in one prompt.
+- The action result state is held in `Map<jobId, Job>` in the browser. Each Job independently has `pending`, `loading`, `success`, or `error` status, its result URL, and its error value.
+- A failed card retries only its own `jobId`. The retry API creates exactly one new one-image task for the same provider and action; it must never regenerate the other 23 jobs.
+- The result area has a `生成中 x/24` progress bar and two views: "按 Provider 分组" and "按动作对比". The comparison view renders 12 rows, each with Provider A and Provider B results side by side.
+- Image previews use `object-fit: contain` and are not cropped.
+
+### Key Files
+
+- `public/action-variation.html`: standalone page entry.
+- `public/action-variation.js`: page state, polling, Job rendering, view switching, and `retrySingleJob(jobId)`.
+- `public/action-variation.css` and `public/action-variation-results.css`: page and result-area styles.
+- `server/action-candidates.js`: 12 fixed `ACTION_CANDIDATES` and `createGenerationJobs(userImage, providers)`.
+- `server/runtime.js`: `createActionVariationBatch`, Job-to-task submission, batch hydration, and `retryActionVariationJob`.
+- `server/index.js`: action-variation batch and per-Job retry routes.
+- `tests/action-candidates.test.js`, `tests/action-variation-batch.test.js`, and `tests/action-variation-static.test.js`: regression coverage.
+
+### API Contract
+
+```text
+POST /api/action-variation/batches
+GET  /api/action-variation/batches/:batchId
+POST /api/action-variation/jobs/:jobId/retry
+```
+
+The batch response exposes `jobs`, where each Job includes `jobId`, `provider`, `actionId`, `actionName`, `fullPrompt`, `status`, `result`, and `error`.
+
+### Non-Negotiable Rules
+
+1. The target is 12 actions x 2 providers = 24 independent Jobs and 24 initial provider requests.
+2. Every image prompt describes exactly one action in one image. The prompt factory rejects known multi-action, multi-image, grid, collage, contact-sheet, and Chinese "宫格" instructions in supplemental text.
+3. Keep image-provider credentials separate from LLM credentials. Do not edit `.env` files or print credential values.
+4. Do not modify Basic image generation unless a task explicitly scopes it.
+5. Preserve unrelated dirty worktree changes and local `data/` runtime files.
+
+### Verification Completed
+
+```powershell
+npm.cmd test
+npm.cmd run typecheck
+```
+
+The latest verification passed 26 Node tests and type checking. The action-variation batch test asserts 12 calls to `generateWithImage2` and 12 calls to `generateWithNanoBanana`; after retrying one `image2` Job, the counts become 13 and 12 respectively.
+
+### Current Local State
+
+- A fresh server for this work was started at `http://127.0.0.1:4193`. Do not assume it remains running next week. The default port `4189` was already in use by another local process.
+- The worktree is dirty. The Action variation files are partly untracked, so inspect `git status --short` before staging or committing.
+- No live paid provider request was made during this feature verification. Request-count assertions use mocked provider methods.
+
+### Recommended Next Work
+
+1. Perform an approved live end-to-end batch only when provider credentials and spending authorization are available; confirm 24 initial image-provider requests in browser/network and server logs.
+2. Decide whether the legacy editable action-template controls should be removed or re-scoped. The current backend always uses the fixed 12 standard actions, while the page still requires a template selection before submission for compatibility.
+3. Clean up legacy, now-unused action-result helper functions in `public/action-variation.js` only as a scoped refactor with regression coverage. Do not alter the 24-Job behavior.
+
 ## Completed Stage
 
 The completed baseline includes **Basic image generation** and **Virtual model composition**. Basic image generation remains the protected Stable Baseline; virtual model composition is an independent business page inside the same application.

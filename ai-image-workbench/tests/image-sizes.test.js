@@ -46,12 +46,26 @@ test('generation task records result metadata from its effective settings', asyn
   process.env = saved;
 });
 
-test('a virtual model 2K request resolves to a configured 2K image2 size', () => {
+test('a 2K image2 request preserves the requested business ratio', () => {
   const saved = { ...process.env };
   Object.assign(process.env, { OPENAI_IMAGE_SIZE_2K_LANDSCAPE: '2048x1152', OPENAI_IMAGE_SIZE_2K_SQUARE: '2048x2048' });
   const runtime = new WorkbenchRuntime(process.cwd());
-  assert.equal(runtime.gptSizeFor({ aspectRatio: '4:3', resolutionTier: '2K' }), '2048x1152');
-  assert.equal(runtime.gptSizeFor({ aspectRatio: '3:4', resolutionTier: '2K' }), '2048x2048');
+  assert.equal(runtime.gptSizeFor({ aspectRatio: '4:3', resolutionTier: '2K' }), '2048x1536');
+  assert.equal(runtime.gptSizeFor({ aspectRatio: '3:4', resolutionTier: '2K' }), '1536x2048');
+  process.env = saved;
+});
+
+test('image2 maps 2K portrait business ratio to a 3:4 provider size', () => {
+  const saved = { ...process.env };
+  Object.assign(process.env, {
+    OPENAI_IMAGE_SIZE_2K_SQUARE: '2048x2048',
+    OPENAI_IMAGE_SIZE_2K_LANDSCAPE: '2048x1152',
+    IMAGE_MAX_EDGE_PX: '3840',
+    IMAGE_SIZE_MULTIPLE_PX: '16',
+    IMAGE_MAX_ASPECT_RATIO: '3',
+  });
+  const runtime = new WorkbenchRuntime(process.cwd());
+  assert.equal(runtime.gptSizeFor({ aspectRatio: '3:4', resolutionTier: '2K' }), '1536x2048');
   process.env = saved;
 });
 

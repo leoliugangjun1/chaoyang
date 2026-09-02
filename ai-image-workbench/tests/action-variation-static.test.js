@@ -1,0 +1,45 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+test('action variation page is a standalone browser module using action batch APIs', async () => {
+  const [html, script, styles, resultStyles] = await Promise.all(['action-variation.html', 'action-variation.js', 'action-variation.css', 'action-variation-results.css'].map((file) => fs.readFile(path.join(root, 'public', file), 'utf8')));
+  assert.match(html, /action-variation\.js/);
+  assert.match(html, /action-variation\.css/);
+  assert.match(html, /action-variation-results\.css/);
+  assert.match(script, /\/api\/assets/);
+  assert.match(script, /\/api\/action-variation\/batches/);
+  assert.match(script, /\/api\/action-variation\/jobs\/\$\{jobId\}\/retry/);
+  assert.doesNotMatch(script, /\/api\/generate/);
+  assert.doesNotMatch(script, /\/api\/tasks\//);
+  assert.doesNotMatch(script, /data-retry-result/);
+  assert.doesNotMatch(script, /function legacy/);
+  assert.doesNotMatch(script, /submitGeneration/);
+  assert.match(script, /outputCount: 1/);
+  assert.match(script, /EXPECTED_JOB_COUNT = 24/);
+  assert.match(script, /12 \* enabledProviderCount/);
+  assert.match(script, /actionGuidance/);
+  assert.match(script, /generationPrompt/);
+  assert.match(script, /data-show-prompt/);
+  assert.match(script, /providerResultSection/);
+  assert.match(script, /av-provider-result-grid/);
+  assert.match(script, /Provider A/);
+  assert.match(script, /Provider B/);
+  assert.match(script, /生成中 \$\{progress\.completed\}\/24/);
+  assert.match(script, /data-retry-job/);
+  assert.match(script, /retrySingleJob/);
+  assert.match(script, /data-results-view/);
+  assert.match(script, /actionComparisonRows/);
+  assert.match(script, /av-action-compare-row/);
+  assert.match(styles, /\.av-main/);
+  assert.match(resultStyles, /\.av-provider-group/);
+  assert.match(resultStyles, /object-fit:contain/);
+  assert.match(resultStyles, /\.av-provider-result \.av-preview-trigger\{display:block;width:100%;line-height:0;aspect-ratio:auto/);
+  assert.ok(resultStyles.lastIndexOf('aspect-ratio:auto') > resultStyles.lastIndexOf('aspect-ratio:3/4'));
+  assert.ok(resultStyles.lastIndexOf('height:auto') > resultStyles.lastIndexOf('height:100%'));
+  assert.match(resultStyles, /av-loading-spinner/);
+});
