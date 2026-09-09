@@ -23,7 +23,7 @@ export const generationPromptFor = ({ subjectProfile, actionGuidance, userRules 
 ].filter(Boolean).join('\n\n');
 
 export async function planActionVariation({ client, imageUrl, templates, extraPrompt = '' }) {
-  if (!/^https:\/\//i.test(imageUrl || '')) throw planError('A public source image URL is required for action planning.');
+  if (!/^https:\/\//i.test(imageUrl || '') && !/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i.test(imageUrl || '')) throw planError('A HTTPS or image Data URL source is required for action planning.');
   if (!Array.isArray(templates) || !templates.length) throw planError('At least one action template is required.');
   const templateRules = templates.map(({ id, name, prompt }) => ({ templateId: id, name, rule: prompt }));
   let data;

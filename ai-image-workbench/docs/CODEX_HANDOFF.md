@@ -1,165 +1,94 @@
 # AI Image Workbench Handoff
 
-## Current Continuation: Model Action Variation (2026-08-27)
+## Snapshot
 
-This section supersedes earlier statements in this document that describe Action variation as future work.
+Date: 2026-09-09
 
-### Delivered Scope
+Repository branch: `feature/action-variation`
 
-- The sidebar item in the "生图工作台" area is named "模特动作裂变" and opens `/action-variation.html`.
-- The page creates 12 fixed action candidates for each of two providers. A normal submission creates 24 independent image-generation tasks: 12 `image2` tasks and 12 `nano_banana` tasks.
-- Each task has one action and `outputCount: 1`. Do not merge actions or ask an image provider for a grid, collage, contact sheet, multiple poses, or multiple images in one prompt.
-- The action result state is held in `Map<jobId, Job>` in the browser. Each Job independently has `pending`, `loading`, `success`, or `error` status, its result URL, and its error value.
-- A failed card retries only its own `jobId`. The retry API creates exactly one new one-image task for the same provider and action; it must never regenerate the other 23 jobs.
-- The result area has a `生成中 x/24` progress bar and two views: "按 Provider 分组" and "按动作对比". The comparison view renders 12 rows, each with Provider A and Provider B results side by side.
-- Image previews use `object-fit: contain` and are not cropped.
+This is one local AI image-generation application with a shared browser shell and navigation. Basic image generation is the protected baseline. Virtual model composition and Action variation are independent business pages that reuse shared server capabilities.
 
-### Key Files
+## Current Modules
 
-- `public/action-variation.html`: standalone page entry.
-- `public/action-variation.js`: page state, polling, Job rendering, view switching, and `retrySingleJob(jobId)`.
-- `public/action-variation.css` and `public/action-variation-results.css`: page and result-area styles.
-- `server/action-candidates.js`: 12 fixed `ACTION_CANDIDATES` and `createGenerationJobs(userImage, providers)`.
-- `server/runtime.js`: `createActionVariationBatch`, Job-to-task submission, batch hydration, and `retryActionVariationJob`.
-- `server/index.js`: action-variation batch and per-Job retry routes.
-- `tests/action-candidates.test.js`, `tests/action-variation-batch.test.js`, and `tests/action-variation-static.test.js`: regression coverage.
+| Module | Browser entry | Business owner | Status |
+| --- | --- | --- | --- |
+| Basic image generation | `public/index.html`, `public/app.js` | Basic generation prompt, upload, settings, task display | Complete and protected |
+| Virtual model composition | `public/virtual-model.html`, `public/virtual-model.js` | Composition inputs, prompts, two-provider round state | Active independent module |
+| Action variation | `public/action-variation.html`, `public/action-variation.js` | Template selection, action planning, 12-plan batch rendering, per-Job retry | Active independent module |
 
-### API Contract
+## Action Variation State
+
+Action variation uses selected templates and a source image to request exactly 12 distinct, single-pose plans from the LLM. Each plan creates one task for each enabled provider. With both providers enabled, a batch has 24 independent Jobs.
+
+Current LLM visual-input path:
 
 ```text
-POST /api/action-variation/batches
-GET  /api/action-variation/batches/:batchId
-POST /api/action-variation/jobs/:jobId/retry
+Local reference image
+-> server/image-data-url.js
+-> data:<mime>;base64,...
+-> Chat Completions messages: text + image_url
+-> streamed LLM action plan
+-> validated 12 action plans
+-> one image task per plan and provider
 ```
 
-The batch response exposes `jobs`, where each Job includes `jobId`, `provider`, `actionId`, `actionName`, `fullPrompt`, `status`, `result`, and `error`.
+Action variation no longer depends on Uguu or another external image host to enter LLM planning. `server/temporary-image-host.js` remains in the repository for other potential consumers and is not part of this path.
 
-### Non-Negotiable Rules
+Action-planning logs use these phases without storing the Base64 payload:
 
-1. The target is 12 actions x 2 providers = 24 independent Jobs and 24 initial provider requests.
-2. Every image prompt describes exactly one action in one image. The prompt factory rejects known multi-action, multi-image, grid, collage, contact-sheet, and Chinese "宫格" instructions in supplemental text.
-3. Keep image-provider credentials separate from LLM credentials. Do not edit `.env` files or print credential values.
-4. Do not modify Basic image generation unless a task explicitly scopes it.
-5. Preserve unrelated dirty worktree changes and local `data/` runtime files.
+1. `action-variation.reference-image-loaded`
+2. `action-variation.reference-image-encoded`
+3. `action-variation.llm-vision-planning-started`
+4. `action-variation.llm-vision-planning-response-received`
+5. `action-variation.action-plan-parsed`
+6. `action-variation.generated-actions-count`
 
-### Verification Completed
-
-```powershell
-npm.cmd test
-npm.cmd run typecheck
-```
-
-The latest verification passed 26 Node tests and type checking. The action-variation batch test asserts 12 calls to `generateWithImage2` and 12 calls to `generateWithNanoBanana`; after retrying one `image2` Job, the counts become 13 and 12 respectively.
-
-### Current Local State
-
-- A fresh server for this work was started at `http://127.0.0.1:4193`. Do not assume it remains running next week. The default port `4189` was already in use by another local process.
-- The worktree is dirty. The Action variation files are partly untracked, so inspect `git status --short` before staging or committing.
-- No live paid provider request was made during this feature verification. Request-count assertions use mocked provider methods.
-
-### Recommended Next Work
-
-1. Perform an approved live end-to-end batch only when provider credentials and spending authorization are available; confirm 24 initial image-provider requests in browser/network and server logs.
-2. Decide whether the legacy editable action-template controls should be removed or re-scoped. The current backend always uses the fixed 12 standard actions, while the page still requires a template selection before submission for compatibility.
-3. Clean up legacy, now-unused action-result helper functions in `public/action-variation.js` only as a scoped refactor with regression coverage. Do not alter the 24-Job behavior.
-
-## Completed Stage
-
-The completed baseline includes **Basic image generation** and **Virtual model composition**. Basic image generation remains the protected Stable Baseline; virtual model composition is an independent business page inside the same application.
-
-## Application Shape
-
-This is one application with one browser shell and left navigation. The business modules are Basic image generation, Virtual model composition, Action variation, and Generation history. Basic image generation and Virtual model composition currently have working browser pages. Action variation and a standalone Generation history page remain future work.
-
-## Current Main Page and Components
-
-- The main page is served from `public/index.html` and rendered by `public/app.js`.
-- Basic image generation supports prompt entry, up to seven reference-image uploads with drag reordering, provider selection, output count `1/2/4/10`, Quality, Background, and a visual `AspectRatioSelector`.
-- `AspectRatioSelector` offers `auto`, `1:1`, `4:3`, `3:4`, `3:2`, `2:3`, `16:9`, and `9:16`.
-- Resolution is a business tier: `1K`, `2K`, or `4K`. It is not a promise of identical native output pixels across providers.
-- The result panel presents task status, generated assets, preview, download, retry, history, and task metadata.
-
-## Generation Call Chain
-
-```text
-Basic image generation UI
--> settings { mode, aspectRatio, resolutionTier, quality, background }
--> POST /api/generate
--> WorkbenchRuntime.createGeneration
--> generation queue
--> provider adapter in server/runtime.js
--> local data/results asset and task history
--> browser polling and result display
-```
-
-Reference-image order is the current `state.files` order. The same order is submitted as `referenceAssetIds` and recorded on the task.
+When the vision LLM returns HTTP 429, the action batch records `LLM upstream overloaded` rather than an image-host error.
 
 ## Provider Status
 
-### Google / Nano Banana
+- GPT/Image2 implementation: `server/runtime.js`, `generateWithImage2`.
+- Google/Nano Banana implementation: `server/runtime.js`, `generateWithNanoBanana`.
+- OpenAI-compatible LLM implementation: `server/llm-client.js`.
+- Action planner: `server/action-variation-planner.js`.
 
-- Provider code: `server/runtime.js`, `generateWithNanoBanana`.
-- Request endpoint: derived from `OPENLUX_BASE_URL` as `/v1beta/models/<OPENLUX_IMAGE_MODEL>:generateContent`.
-- Request configuration: Gemini `generationConfig.imageConfig`, using business `aspectRatio` and `resolutionTier` as `aspectRatio` and `imageSize`.
-- Response parser: reads Gemini `candidates[].content.parts[].inlineData.data`, while retaining compatibility with Markdown-wrapped image data URLs.
-- Verified: a real Google text-to-image request completed with `aspectRatio: 16:9` and `imageSize: 1K`.
+Verified probes in the current phase:
 
-### GPT / Image2
+- LLM text-only Chat Completions request returned the expected response.
+- LLM vision Chat Completions request accepted a synthetic Base64 image Data URL and returned HTTP 200.
+- GPT Image 2.5 Sunburst minimal generation probe returned HTTP 200 with an image result when directly using the supplied configuration block.
+- A public HTTPS image vision probe previously returned an upstream-saturated HTTP 429. Treat this as provider capacity, not a Base64 formatting failure.
 
-- Provider code: `server/runtime.js`, `generateWithImage2`.
-- Text-to-image uses the configured OpenAI-compatible `/images/generations` JSON endpoint.
-- Image-to-image uses the configured `/images/edits` multipart endpoint and preserves reference image order.
-- The provider maps business `aspectRatio` and `resolutionTier` to the closest configured legal `size` from `OPENAI_IMAGE_SIZE_*`.
-- Verified request construction: `16:9 + 2K` produced `size: 2048x1152`. The most recent real GPT provider call timed out after 180 seconds; this was a provider timeout after correct request construction.
+## LAN Runtime
 
-## Environment Contract
+The workbench service is configured to run through the Windows scheduled task `AI Image Workbench LAN` on `192.168.66.140:8081`. Xiaopi Nginx exposes the LAN proxy entry at `http://192.168.66.140:8082/`.
 
-All configuration is server-side. Never record a real key in this document.
+`启动局域网服务.cmd` starts or verifies the scheduled task and Xiaopi proxy, then checks the two health endpoints. It does not edit project configuration.
 
-- Google/OpenLux: `OPENLUX_API_KEY`, `OPENLUX_BASE_URL`, `OPENLUX_IMAGE_MODEL`.
-- GPT/Image2: `OPENAI_API_KEY`, `LLM_BASE_URL`, `OPENAI_IMAGE_MODEL`, optional `OPENAI_IMAGE_GENERATION_URL`, and optional `OPENAI_IMAGE_EDIT_URL`.
-- Runtime: `MAX_CONCURRENCY`, `GENERATION_CONCURRENCY`, `PROVIDER_TIMEOUT_MS`, `HOST`, `PORT`, and `DEFAULT_IMAGE_PROVIDER`.
-- GPT size allowlist and validation: `OPENAI_IMAGE_SIZE_*`, `IMAGE_MAX_EDGE_PX`, `IMAGE_SIZE_MULTIPLE_PX`, and `IMAGE_MAX_ASPECT_RATIO`.
-- Compatibility fallbacks: `GOOGLE_API_KEY` and `GOOGLE_IMAGE_MODEL`.
+## Current Tests
 
-The user alone edits `.env` files. Agents provide proposed values and execution guidance only.
-
-## Key Directories
-
-- `public/`: browser shell and Basic image generation UI.
-- `server/`: HTTP API, runtime, queue, provider adapters, and plugin manager.
-- `src/shared/`: platform protocol and errors.
-- `modules/`: declarative versioned modules.
-- `tests/`: Node regression suite.
-- `scripts/`: build and validation commands.
-- `data/`: ignored local runtime state, assets, history, templates, and logs.
-- `docs/`: architecture and handoff material.
-
-## Verification Snapshot
-
-The current baseline passed:
+The current stable worktree passed:
 
 ```text
-npm.cmd test            12 passing tests
-npm.cmd run typecheck   passed
-npm.cmd run build       passed
+npm.cmd test          30 passing
+npm.cmd run typecheck passed
+npm.cmd run build     passed
 ```
 
-Browser verification confirmed that all eight ratio options render and are selectable, and that selecting `16:9` stores the business value `aspectRatio: "16:9"` before generation.
+Relevant regression coverage:
 
-## Known Issues
+- `tests/action-variation-batch.test.js`: Base64 Data URL reaches the planner, six planning stages are logged, 12 plans and 24 provider tasks remain intact, and single-Job retry remains scoped.
+- `tests/action-variation-planner.test.js`: planner accepts HTTPS and image Data URL inputs, validates plan count and source-template references.
+- `tests/image-data-url.test.js`: local image Data URL encoding and clear read failure behavior.
 
-1. The virtual model page stores its browser workspace snapshot and selected-result state in `localStorage`; task and asset records remain server-side.
-2. A virtual model generation round is represented in the browser as two provider tasks. The server does not currently expose a native parent-round entity.
-3. The main page navigation still has placeholder entries for Action variation and Generation history. Virtual model navigation is available through its page entry, while the main-shell navigation integration should be handled as a separate scoped task.
-4. The most recent GPT text-to-image validation request reached the configured provider timeout after sending the correct mapped request. The task records the provider timeout.
+## Git Handoff
 
-## Basic Image Generation Protection
+Before staging, inspect `git status --short --branch`. The parent repository contains unrelated dirty files and untracked projects. Stage only `ai-image-workbench` files that belong to the requested work.
 
-Do not modify the Basic image generation UI, prompt and upload flow, reference-image ordering, output count, queue, result display, download flow, provider mappings, or related tests unless a task explicitly scopes Basic image generation.
+The Basic image generation baseline remains protected. Do not modify `public/app.js`, Basic image-generation browser behavior, or its tests without explicit scope.
 
-## Next Stage: Virtual Model Composition
+## Next Work
 
-Virtual model composition is a new business module inside this application, not a second independent application. It must appear in the existing left navigation alongside Basic image generation, Action variation, and Generation history.
-
-It may reuse the existing provider adapters, API client, asset upload API, task persistence, history, and application shell. Its business rules, inputs, task construction, and module workflow must remain independent from Basic image generation.
+1. Run an approved live Action variation planning request after confirming provider capacity. Check the six action-planning log phases and confirm 12 plans are parsed.
+2. If a live vision request returns `LLM upstream overloaded`, treat it as an upstream capacity issue and retry later; do not reintroduce Uguu as a workaround.
+3. Keep further Action variation work scoped to its page, planner, and batch runtime path.

@@ -1,76 +1,106 @@
 # AI Image Workbench
 
-## Product Boundary
+## Product Scope
 
-This repository is one AI image-generation application. The left navigation contains business modules within the same application shell:
+This repository is one local AI image-generation application. It has one browser shell and one left navigation. Business modules share the shell, HTTP API, asset storage, task queue, provider adapters, result assets, and history, while each module owns its own inputs, prompts, orchestration, and UI state.
+
+Current modules:
 
 - Basic image generation
 - Virtual model composition
 - Action variation
-- Generation history
-
-They share the application shell, navigation, server API, provider integrations, uploads, task storage, and result assets. Each business module owns its own generation rules and workflow.
+- Generation history entry in the shared navigation
 
 ## Directory Map
 
-- `public/`: browser application shell and Basic image generation UI. `public/app.js` owns the current Basic image generation interaction state; CSS files style the shell and views.
-- `server/`: loopback HTTP API, runtime, generation queue, and plugin manager. `server/index.js` owns routes; `server/runtime.js` owns tasks, local persistence, and provider adapters.
-- `src/shared/`: shared protocol, platform errors, and capability definitions.
-- `modules/`: declarative, versioned business-module manifests. They do not contain browser executable code.
-- `tests/`: Node test suite for runtime, HTTP, queue, module, plugin, and provider mappings.
+- `public/`: browser application shell and module pages.
+  - Basic image generation: `index.html`, `app.js`, `styles.css`.
+  - Virtual model composition: `virtual-model.html`, `virtual-model.js`, `virtual-model.css`.
+  - Action variation: `action-variation.html`, `action-variation.js`, `action-variation.css`, `action-variation-results.css`.
+- `server/`: HTTP API, runtime state, queue, provider adapters, LLM client, action planner, and local asset handling.
+  - Routes: `server/index.js`.
+  - Shared runtime and image providers: `server/runtime.js`.
+  - GPT/Image2 adapter: `WorkbenchRuntime.generateWithImage2` in `server/runtime.js`.
+  - Google/Nano Banana adapter: `WorkbenchRuntime.generateWithNanoBanana` in `server/runtime.js`.
+  - OpenAI-compatible LLM client: `server/llm-client.js`.
+  - Action planning: `server/action-variation-planner.js`.
+  - Action-variation reference-image Data URL encoder: `server/image-data-url.js`.
+- `src/shared/`: protocol types, platform errors, and capability definitions.
+- `modules/`: declarative module-contract placeholders. Browser behavior remains in `public/` until a versioned declarative workflow is introduced.
+- `tests/`: Node regression tests.
 - `scripts/`: build and module/plugin validation scripts.
-- `data/`: runtime uploads, results, history, registry, templates, and logs. Runtime data is local and ignored by Git.
-- `docs/`: architecture and current handoff records.
+- `data/`: ignored local runtime state: uploads, assets, results, task history, action batches, templates, registry, and logs.
+- `docs/`: architecture and handoff documents.
 
-## Basic Image Generation Baseline
+## Module Boundaries
 
-Basic image generation is complete and is the protected baseline. Its product code is primarily in `public/app.js`, `public/styles.css`, `server/index.js`, `server/runtime.js`, and `tests/`.
+### Basic Image Generation
 
-Do not change its UI behavior, prompt flow, uploads, reference-image ordering, generation count, task queue, result display, download behavior, provider request mapping, or tests unless a later task explicitly names Basic image generation as its scope.
+Basic image generation is complete and protected. Its business behavior is owned by `public/app.js` and its main-page styling. It uses shared runtime services in `server/runtime.js`.
 
-New business modules must keep business logic separate from the Basic image generation workflow. They may reuse shared API, provider, upload, task, asset, history, and application-shell capabilities without copying or modifying the Basic image generation business flow.
+Do not change its UI behavior, prompt flow, upload flow, reference-image ordering, output count, queue behavior, result display, download behavior, provider mapping, or related tests unless a task explicitly scopes Basic image generation.
 
-## Provider Boundary
+### Virtual Model Composition
 
-- GPT/Image2 is implemented in `server/runtime.js` and uses the configured OpenAI-compatible images endpoints. The provider maps business `aspectRatio` and `resolutionTier` to its supported `size`.
-- Google/Nano Banana is implemented in `server/runtime.js` and uses the configured OpenLux Gemini native endpoint. The provider maps business `aspectRatio` and `resolutionTier` to Gemini `imageConfig.aspectRatio` and `imageConfig.imageSize`.
-- Browser code must never receive provider API keys.
+Virtual model composition is an independent page module. Keep its composition inputs, prompt rules, and round orchestration in `public/virtual-model.*`. It may reuse only shared application services.
 
-## Environment Contract
+### Action Variation
 
-Never edit `.env`, `.env.*`, or `*.env` files. Provide exact proposed values and user execution guidance instead. Never record or print a real key.
+Action variation is an independent page module. A submission selects templates and sends a reference image to the LLM action planner. The planner creates exactly 12 single-pose action plans. Each plan creates one task per enabled provider, normally 12 x 2 = 24 independent tasks.
 
-Current server-side variable names:
+For LLM visual planning, action variation reads the local source image and sends it as an image Data URL through Chat Completions. Do not reintroduce a mandatory external image host into this path. Keep task retries scoped to one Job.
 
-- `OPENLUX_API_KEY`, `OPENLUX_BASE_URL`, `OPENLUX_IMAGE_MODEL`: Google/OpenLux authentication, base URL, and Gemini image model.
-- `OPENAI_API_KEY`, `LLM_BASE_URL`, `OPENAI_IMAGE_MODEL`: GPT/Image2 authentication, OpenAI-compatible base URL, and image model.
-- `OPENAI_IMAGE_GENERATION_URL`, `OPENAI_IMAGE_EDIT_URL`: optional GPT endpoint overrides.
+## Provider and Credential Rules
+
+Browser code never receives provider credentials. Never print, commit, log, or edit real keys.
+
+Never create, modify, overwrite, delete, rename, or otherwise update `.env`, `.env.*`, or `*.env` files. Provide exact proposed values and manual execution guidance when configuration changes are needed.
+
+Use one entry per environment variable. The runtime preserves process variables and otherwise reads the first matching `.env` entry. Later duplicate entries are ignored.
+
+Image generation and LLM credentials are separate:
+
+- `OPENAI_API_KEY`: GPT/Image2 provider only.
+- `LLM_BASE_URL`: GPT/Image2 OpenAI-compatible base URL.
+- `OPENAI_IMAGE_MODEL`: GPT/Image2 model name.
+- `OPENAI_IMAGE_GENERATION_URL`: optional GPT text-to-image endpoint override.
+- `OPENAI_IMAGE_EDIT_URL`: optional GPT image-to-image endpoint override.
+- `OPENLUX_API_KEY`: OpenLux/Google image provider only.
+- `OPENLUX_BASE_URL`: OpenLux image API base URL.
+- `OPENLUX_IMAGE_MODEL`: OpenLux/Google image model.
 - `GOOGLE_API_KEY`, `GOOGLE_IMAGE_MODEL`: Google-compatible fallbacks when OpenLux variables are absent.
-- `MAX_CONCURRENCY`, `GENERATION_CONCURRENCY`: maximum concurrent image jobs.
+- `OPENAI_LLM_API_KEY`: OpenAI-compatible LLM calls only.
+- `OPENAI_LLM_BASE_URL`: LLM Chat Completions URL.
+- `OPENAI_LLM_MODEL`: LLM model name.
+- `OPENAI_LLM_RESPONSES_URL`: optional explicit LLM Responses URL.
+- `MAX_CONCURRENCY`, `GENERATION_CONCURRENCY`: image task concurrency.
 - `PROVIDER_TIMEOUT_MS`: per-provider request timeout.
+- `LLM_TIMEOUT_MS`: action-planning LLM timeout.
 - `HOST`, `PORT`: local server bind address and port.
-- `DEFAULT_IMAGE_PROVIDER`: default provider selection.
-- `OPENAI_IMAGE_SIZE_*`: configured GPT legal size allowlist.
-- `IMAGE_MAX_EDGE_PX`, `IMAGE_SIZE_MULTIPLE_PX`, `IMAGE_MAX_ASPECT_RATIO`: validation limits for configured GPT sizes.
-- `WORKBENCH_PLUGIN_ROOT`: optional external plugin package root.
+- `DEFAULT_IMAGE_PROVIDER`: default image provider.
+- `OPENAI_IMAGE_SIZE_*`: GPT size allowlist.
+- `IMAGE_MAX_EDGE_PX`, `IMAGE_SIZE_MULTIPLE_PX`, `IMAGE_MAX_ASPECT_RATIO`: GPT size validation limits.
+- `WORKBENCH_PLUGIN_ROOT`: optional external plugin root.
+
+Before an external LLM call, confirm it uses `OPENAI_LLM_API_KEY`. For OpenLux vision and action planning, use Chat Completions with `messages`, `image_url`, and `stream: true`. Action variation uses an in-memory Data URL and must not log the Base64 payload.
 
 ## Development Rules
 
-- Read the current code, configuration, and live process state before changing behavior.
-- Keep changes inside the requested module and ownership boundary. Do not bundle unrelated refactors or feature work.
-- Use business-layer `aspectRatio` and `resolutionTier`; provider adapters translate them to provider-specific parameters.
-- Keep Provider keys and raw credentials server-side. Redact secrets from commands, logs, tests, and documentation.
-- Preserve runtime `data/`; do not delete it as part of normal work.
-- Validate relevant behavior with focused tests and use the repository scripts below.
+- Read the current code, runtime configuration shape, and relevant logs before changing behavior.
+- Keep changes within the requested module and ownership boundary. Do not bundle unrelated refactors or features.
+- New business modules must keep business logic isolated from Basic image generation while reusing shared services where appropriate.
+- Use business-layer `aspectRatio` and `resolutionTier`; provider adapters perform provider-specific translation.
+- Preserve `data/` and unrelated dirty worktree changes.
+- For bugs, establish a focused, red-capable reproduction before changing behavior.
+- Add targeted regression coverage for changed behavior and run the applicable repository commands.
 
-## Commands
+## Validation Commands
 
-Run from the repository root:
+Run from this repository root:
 
 ```powershell
-npm.cmd run dev
-npm.cmd run typecheck
 npm.cmd test
+npm.cmd run typecheck
 npm.cmd run build
 npm.cmd run validate:module
 npm.cmd run validate:plugin

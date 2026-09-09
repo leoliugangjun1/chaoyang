@@ -216,7 +216,7 @@ function batchFromApi(batch) {
     subjectProfile: batch.subjectProfile || '',
     jobIds: jobs.map((job) => job.jobId),
     actionRows: (batch.actionPlans || []).map((plan) => ({
-      actionId: plan.templateId,
+      actionId: plan.actionPlanId,
       templateId: plan.actionPlanId,
       templateName: plan.name,
       actionGuidance: plan.actionGuidance || '',

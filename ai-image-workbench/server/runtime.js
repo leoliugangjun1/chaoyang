@@ -6,15 +6,14 @@ import { PluginManager } from './plugin-manager.js';
 import { GenerationTaskQueue } from './generation-queue.js';
 import { OpenAiCompatibleLlmClient } from './llm-client.js';
 import { planActionVariation } from './action-variation-planner.js';
-import { ACTION_CANDIDATES, createGenerationJobs } from './action-candidates.js';
-import { TemporaryImageHost } from './temporary-image-host.js';
+import { imageToDataUrl } from './image-data-url.js';
 
 const json = async (file) => JSON.parse(await fs.readFile(file, 'utf8'));
 const now = () => new Date().toISOString();
 const id = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 
 export class WorkbenchRuntime {
-  constructor(root, options = {}) { this.root = root; this.dataDir = path.join(root, 'data'); this.tasks = new Map(); this.actionBatches = new Map(); this.modules = []; this.quarantine = []; this.templates = []; this.llmClient = options.llmClient || null; this.temporaryImageHost = options.temporaryImageHost || new TemporaryImageHost(); this.pluginManager = new PluginManager(root, options.pluginRoot); this.generationQueue = null; this.debugLogPath = path.join(this.dataDir, 'logs', 'image2-trace.ndjson'); }
+  constructor(root, options = {}) { this.root = root; this.dataDir = path.join(root, 'data'); this.tasks = new Map(); this.actionBatches = new Map(); this.modules = []; this.quarantine = []; this.templates = []; this.llmClient = options.llmClient || null; this.pluginManager = new PluginManager(root, options.pluginRoot); this.generationQueue = null; this.debugLogPath = path.join(this.dataDir, 'logs', 'image2-trace.ndjson'); }
   async initialize() { await this.loadServerEnv(); this.generationQueue = new GenerationTaskQueue({ concurrency: Number(process.env.GENERATION_CONCURRENCY || process.env.MAX_CONCURRENCY || 2) }); for (const dir of ['assets', 'action-batches', 'history', 'logs', 'registry', 'uploads', 'results']) await fs.mkdir(path.join(this.dataDir, dir), { recursive: true }); await this.discoverModules(); await this.pluginManager.initialize(); await this.loadHistory(); await this.loadActionBatches(); await this.loadTemplates(); }
   async debugLog(event) { try { await fs.appendFile(this.debugLogPath, `${JSON.stringify({ at: now(), ...event })}\n`, 'utf8'); } catch {} }
   async loadServerEnv() { try { const text = await fs.readFile(path.join(this.root, '.env'), 'utf8'); for (const line of text.split(/\r?\n/)) { const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/); if (match && !process.env[match[1]]) process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, ''); } } catch {} }
@@ -30,23 +29,55 @@ export class WorkbenchRuntime {
     if (!sourceAssetId) throw new PlatformError('ACTION_BATCH_INVALID', 'A source image is required.');
     if (!providers.length || providers.some((provider) => !['image2', 'nano_banana'].includes(provider))) throw new PlatformError('ACTION_BATCH_INVALID', 'Select at least one supported provider.');
     const templates = templateIds.map((templateId) => this.templates.find((template) => template.id === templateId)).filter(Boolean);
+    if (!templates.length) throw new PlatformError('ACTION_BATCH_INVALID', 'Select at least one action template.');
     if (templates.length !== templateIds.length) throw new PlatformError('ACTION_BATCH_INVALID', 'One or more action templates are unavailable.');
     const sourceAsset = await this.asset(sourceAssetId);
     const batch = { batchId: id('action_batch'), sourceAssetId, templateIds, providers, settings: input.settings || {}, extraPrompt: input.extraPrompt || '', outputCount: 1, status: 'queued', actionPlans: [], jobs: [], createdAt: now(), updatedAt: now() };
     this.actionBatches.set(batch.batchId, batch);
     await this.persistActionBatch(batch);
     try {
-      const jobs = createGenerationJobs({ assetId: sourceAsset.assetId, name: sourceAsset.name, extraPrompt: batch.extraPrompt }, providers);
-      const plansByAction = new Map(ACTION_CANDIDATES.map((action) => [action.id, { actionPlanId: id('action_plan'), templateId: action.id, name: action.name, actionGuidance: action.promptSuffix, generationPrompt: jobs.find((job) => job.actionId === action.id)?.fullPrompt || '', providerTaskIds: {} }]));
-      batch.subjectProfile = 'Reference image identity and clothing must be preserved.';
-      batch.actionPlans = [...plansByAction.values()];
+      await this.debugLog({ phase: 'action-variation.reference-image-loaded', batchId: batch.batchId, assetId: sourceAsset.assetId, mimeType: sourceAsset.mimeType });
+      const referenceDataUrl = await imageToDataUrl(sourceAsset.localPath, sourceAsset.mimeType);
+      await this.debugLog({ phase: 'action-variation.reference-image-encoded', batchId: batch.batchId, mimeType: sourceAsset.mimeType, base64Length: referenceDataUrl.length - `data:${sourceAsset.mimeType};base64,`.length });
+      const client = this.llmClient || OpenAiCompatibleLlmClient.fromEnvironment();
+      await this.debugLog({ phase: 'action-variation.llm-vision-planning-started', batchId: batch.batchId, protocol: 'Chat Completions', stream: true, imageInput: 'data-url' });
+      let planned;
+      try {
+        planned = await planActionVariation({ client, imageUrl: referenceDataUrl, templates, extraPrompt: batch.extraPrompt });
+      } catch (error) {
+        if (error?.status === 429) {
+          await this.debugLog({ phase: 'action-variation.llm-vision-planning-error', batchId: batch.batchId, classification: 'LLM upstream overloaded', status: 429 });
+          error.message = 'LLM upstream overloaded';
+        }
+        throw error;
+      }
+      await this.debugLog({ phase: 'action-variation.llm-vision-planning-response-received', batchId: batch.batchId, actionPlanCount: planned.actionPlans.length });
+      const plansById = new Map(planned.actionPlans.map((plan) => {
+        const actionPlan = { actionPlanId: id('action_plan'), ...plan, providerTaskIds: {} };
+        return [actionPlan.actionPlanId, actionPlan];
+      }));
+      await this.debugLog({ phase: 'action-variation.action-plan-parsed', batchId: batch.batchId, actionPlanCount: plansById.size });
+      const jobs = [...plansById.values()].flatMap((plan) => providers.map((provider) => ({
+        jobId: `${provider}-${plan.actionPlanId}-${crypto.randomUUID()}`,
+        provider,
+        providerName: provider === 'nano_banana' ? 'Google' : provider,
+        actionId: plan.actionPlanId,
+        actionName: plan.name,
+        fullPrompt: plan.generationPrompt,
+        status: 'pending',
+        result: null,
+        error: null,
+      })));
+      batch.subjectProfile = planned.subjectProfile;
+      batch.actionPlans = [...plansById.values()];
       batch.jobs = jobs;
+      await this.debugLog({ phase: 'action-variation.generated-actions-count', batchId: batch.batchId, count: batch.actionPlans.length });
       batch.updatedAt = now();
       await this.persistActionBatch(batch);
       // Every job maps to one provider request. With two providers this creates 12 + 12 independent tasks.
       const submissions = await Promise.allSettled(jobs.map(async (job) => {
         job.status = 'loading';
-        const plan = plansByAction.get(job.actionId);
+        const plan = plansById.get(job.actionId);
         const task = await this.createGeneration({ provider: job.provider, prompt: job.fullPrompt, outputCount: 1, referenceAssetIds: [sourceAssetId], actionTemplateId: job.actionId, actionPlanId: plan.actionPlanId, actionBatchId: batch.batchId, settings: batch.settings });
         job.taskId = task.taskId;
         job.result = task.images?.[0]?.url || null;
@@ -82,7 +113,7 @@ export class WorkbenchRuntime {
     const job = batch.jobs.find((candidate) => candidate.jobId === jobId);
     const currentTask = this.tasks.get(job.taskId);
     if (['queued', 'processing', 'running'].includes(currentTask?.status)) throw new PlatformError('ACTION_JOB_ACTIVE', 'This action variation job is already generating.');
-    const plan = batch.actionPlans.find((candidate) => candidate.templateId === job.actionId);
+    const plan = batch.actionPlans.find((candidate) => candidate.actionPlanId === job.actionId);
     if (!plan) throw new PlatformError('ACTION_PLAN_NOT_FOUND', 'Action variation plan not found.');
 
     // A retry creates exactly one one-image task for the requested job.

@@ -20,6 +20,16 @@ test('planner sends the source image and produces one validated plan per templat
   assert.match(plan.actionPlans[0].generationPrompt, /single pose 1, full body/);
 });
 
+test('planner accepts an image Data URL as the source image', async () => {
+  let messages;
+  await planActionVariation({
+    client: { createCompletionStream: async (value) => { messages = value; return { output_text: JSON.stringify({ subjectProfile: 'subject', actionPlans: Array.from({ length: ACTION_CANDIDATE_COUNT }, (_, index) => ({ templateId: 'one', name: `Action ${index + 1}`, actionGuidance: `single pose ${index + 1}` })) }) }; } },
+    imageUrl: 'data:image/png;base64,aW1hZ2U=',
+    templates: [{ id: 'one', name: 'One', prompt: 'rule' }],
+  });
+  assert.equal(messages[1].content[1].image_url.url, 'data:image/png;base64,aW1hZ2U=');
+});
+
 test('planner rejects a plan that does not cover the selected templates', async () => {
   await assert.rejects(() => planActionVariation({
     client: { createCompletionStream: async () => ({ output_text: '{"subjectProfile":"subject","actionPlans":[]}' }) },

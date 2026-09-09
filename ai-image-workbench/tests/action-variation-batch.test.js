@@ -11,16 +11,27 @@ test('action variation batch creates one independent image task for every plan a
   const originalGoogleKey = process.env.OPENLUX_API_KEY;
   process.env.OPENAI_API_KEY = 'test-image2-key';
   process.env.OPENLUX_API_KEY = 'test-google-key';
-  const runtime = new WorkbenchRuntime(root);
+  const plannerCalls = [];
+  const runtime = new WorkbenchRuntime(root, {
+    llmClient: { createCompletionStream: async (messages) => {
+      plannerCalls.push(messages);
+      return { output_text: JSON.stringify({
+        subjectProfile: 'same subject and outfit',
+        actionPlans: Array.from({ length: 12 }, (_, index) => ({ templateId: 'tpl_pose', name: `Pose ${index + 1}`, actionGuidance: `distinct single pose ${index + 1}` })),
+      }) };
+    } },
+  });
   await runtime.initialize();
   const providerCalls = { image2: 0, nano_banana: 0 };
   runtime.generateWithImage2 = async () => ({ assetId: `image2-${++providerCalls.image2}`, url: `/api/assets/image2-${providerCalls.image2}`, mimeType: 'image/png' });
   runtime.generateWithNanoBanana = async () => ({ assetId: `google-${++providerCalls.nano_banana}`, url: `/api/assets/google-${providerCalls.nano_banana}`, mimeType: 'image/png' });
 
   try {
+    runtime.templates = [{ id: 'tpl_pose', category: 'action-variation', name: 'Pose template', prompt: 'Create twelve distinct poses.' }];
     const source = await runtime.createUpload({ name: 'subject.png', mimeType: 'image/png', data: 'data:image/png;base64,aW1hZ2U=' });
     const batch = await runtime.createActionVariationBatch({
       sourceAssetId: source.assetId,
+      templateIds: ['tpl_pose'],
       providers: ['image2', 'nano_banana'],
       settings: { aspectRatio: '3:4', resolutionTier: '2K' },
       extraPrompt: 'pure white background',
@@ -28,6 +39,21 @@ test('action variation batch creates one independent image task for every plan a
 
     assert.equal(batch.outputCount, 1);
     assert.equal(batch.actionPlans.length, 12);
+    assert.equal(plannerCalls.length, 1);
+    assert.match(plannerCalls[0][1].content[1].image_url.url, /^data:image\/png;base64,/);
+    assert.equal(Buffer.from(plannerCalls[0][1].content[1].image_url.url.split(',')[1], 'base64').length, 5);
+    assert.equal(JSON.parse(plannerCalls[0][1].content[0].text).templateRules[0].rule, 'Create twelve distinct poses.');
+    assert.deepEqual(new Set(batch.actionPlans.map((plan) => plan.templateId)), new Set(['tpl_pose']));
+    assert.equal(new Set(batch.actionPlans.map((plan) => plan.actionPlanId)).size, 12);
+    const phases = (await fs.readFile(path.join(root, 'data', 'logs', 'image2-trace.ndjson'), 'utf8')).trim().split(/\r?\n/).map((line) => JSON.parse(line)).filter((entry) => entry.batchId === batch.batchId).map((entry) => entry.phase);
+    assert.deepEqual(phases.filter((phase) => phase.startsWith('action-variation.')), [
+      'action-variation.reference-image-loaded',
+      'action-variation.reference-image-encoded',
+      'action-variation.llm-vision-planning-started',
+      'action-variation.llm-vision-planning-response-received',
+      'action-variation.action-plan-parsed',
+      'action-variation.generated-actions-count',
+    ]);
     assert.equal(batch.jobs.length, 24);
     assert.equal(batch.jobs.filter((job) => job.provider === 'image2').length, 12);
     assert.equal(batch.jobs.filter((job) => job.provider === 'nano_banana').length, 12);
@@ -43,7 +69,8 @@ test('action variation batch creates one independent image task for every plan a
       assert.equal(task.actionBatchId, batch.batchId);
       assert.equal(task.actionPlanId, plan.actionPlanId);
       assert.equal(task.prompt, plan.generationPrompt);
-      assert.match(task.prompt, /Create exactly one pose/);
+      assert.match(task.prompt, /distinct single pose/);
+      assert.match(task.prompt, /same subject and outfit/);
       assert.doesNotMatch(task.prompt, /contact sheet|collage|\bgrid\b/i);
     }
 
