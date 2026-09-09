@@ -46,6 +46,46 @@ test('generation task records result metadata from its effective settings', asyn
   process.env = saved;
 });
 
+test('GPT Image 2.5 uses its own basic-generation route and model', async () => {
+  const saved = { ...process.env };
+  Object.assign(process.env, { GPT_IMAGE_2_5_MODEL: 'gpt-image-2.5-sunburst' });
+  const runtime = new WorkbenchRuntime(process.cwd());
+  runtime.generationQueue = { add: (job) => job() };
+  runtime.persistTask = async () => {};
+  runtime.generateImage = async () => ({ assetId: 'result', url: '/api/assets/result', mimeType: 'image/png' });
+  const task = await runtime.createGeneration({ provider: 'gpt_image_2_5', prompt: 'test', settings: { aspectRatio: '3:4', resolutionTier: '2K', quality: 'high', background: 'opaque' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const created = runtime.tasks.get(task.taskId);
+  assert.equal(created.provider, 'gpt_image_2_5');
+  assert.equal(created.model, 'gpt-image-2.5-sunburst');
+  assert.equal(created.resolution, '1536x2048');
+  assert.deepEqual(created.settings, { mode: 'image_to_image', aspectRatio: '3:4', resolutionTier: '2K', resolution: 'auto', quality: 'high', background: 'opaque' });
+  process.env = saved;
+});
+
+test('GPT Image 2.5 sends the selected basic-generation settings', async () => {
+  const saved = { ...process.env };
+  const savedFetch = globalThis.fetch;
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ai-workbench-gpt-image-2-5-'));
+  try {
+    Object.assign(process.env, { GPT_IMAGE_2_5_API_KEY: 'test-key', GPT_IMAGE_2_5_MODEL: 'gpt-image-2.5-sunburst', GPT_IMAGE_2_5_BASE_URL: 'https://api.openlux.ai/v1' });
+    let request;
+    globalThis.fetch = async (url, init) => {
+      request = { url, body: JSON.parse(init.body) };
+      return new Response(JSON.stringify({ data: [{ b64_json: 'aGVsbG8=' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    const runtime = new WorkbenchRuntime(process.cwd());
+    const task = { requestId: 'request', taskId: 'task', provider: 'gpt_image_2_5', model: 'gpt-image-2.5-sunburst', prompt: 'studio portrait', referenceAssetIds: [], settings: { aspectRatio: '3:4', resolutionTier: '2K', quality: 'high', background: 'opaque' } };
+    await runtime.generateWithImage2(task, 'result', path.join(dir, 'result.png'));
+    assert.equal(request.url, 'https://api.openlux.ai/v1/images/generations');
+    assert.deepEqual(request.body, { model: 'gpt-image-2.5-sunburst', prompt: 'studio portrait', size: '1536x2048', quality: 'high', background: 'opaque', moderation: 'low' });
+  } finally {
+    globalThis.fetch = savedFetch;
+    process.env = saved;
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('a 2K image2 request preserves the requested business ratio', () => {
   const saved = { ...process.env };
   Object.assign(process.env, { OPENAI_IMAGE_SIZE_2K_LANDSCAPE: '2048x1152', OPENAI_IMAGE_SIZE_2K_SQUARE: '2048x2048' });
